@@ -1,11 +1,26 @@
 import { NextRequest, NextResponse } from "next/server";
-import { parseStatementWithGroq } from "@/lib/groq";
+import { parseStatementWithGroq, parseStatementFromImages } from "@/lib/groq";
+import { pdfBufferToBase64Images } from "@/lib/pdf-to-images";
 import { insertTransactions } from "@/lib/supabase";
 import type { Transaction } from "@/lib/supabase";
 
 type Source = Transaction["source"];
+const VALID_SOURCES: Source[] = ["savings", "credit"];
 
-const VALID_SOURCES: Source[] = ["savings", "credit_swiggy", "credit_roarbank"];
+async function extractTextFromPdf(buffer: Buffer, password?: string): Promise<string> {
+  // eval("require") bypasses Turbopack's static import analysis so pdf-parse
+  // is loaded by Node.js natively (CJS) instead of being bundled by Turbopack.
+  // pdf-parse is in serverExternalPackages so the Node.js runtime finds it correctly.
+  // eslint-disable-next-line no-eval
+  const pdfParse = eval("require")("pdf-parse") as (
+    buf: Buffer,
+    opts?: object
+  ) => Promise<{ text: string }>;
+
+  const opts = password ? { password } : {};
+  const data = await pdfParse(buffer, opts);
+  return data.text ?? "";
+}
 
 export async function POST(req: NextRequest) {
   try {
@@ -23,53 +38,81 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "Invalid source value" }, { status: 400 });
     }
 
-    // Convert file to buffer
     const buffer = Buffer.from(await file.arrayBuffer());
 
-    // pdf-parse ESM import
-    const pdfModule = await import("pdf-parse");
-    // Handle both CJS default and ESM named exports
-    const pdfParse: (buf: Buffer, opts?: any) => Promise<{ text: string }> =
-      (pdfModule as any).default ?? (pdfModule as any);
-
-    let pdfData: { text: string };
+    let rawText: string;
     try {
-      pdfData = await pdfParse(buffer, password ? { password } : undefined);
+      rawText = await extractTextFromPdf(buffer, password || undefined);
     } catch (pdfErr: any) {
-      if (pdfErr.message?.includes("password")) {
+      const msg: string = pdfErr?.message ?? "";
+      if (msg.toLowerCase().includes("password") || msg.toLowerCase().includes("encrypted")) {
         return NextResponse.json(
           { error: "This PDF is password-protected. Please enter the correct password." },
           { status: 400 }
         );
       }
-      throw pdfErr;
+      return NextResponse.json({ error: `PDF parsing failed: ${msg}` }, { status: 400 });
     }
 
-    const rawText = pdfData.text;
+    let card_name: string | null;
+    let transactions: Awaited<ReturnType<typeof parseStatementWithGroq>>["transactions"];
+
     if (!rawText?.trim()) {
-      return NextResponse.json({ error: "Could not extract text from PDF" }, { status: 400 });
+      // Image-based / scanned PDF — fall back to Groq vision (qwen/qwen3.8-27b)
+      console.log("[upload] no text extracted — taking vision path");
+      let pageImages: string[];
+      try {
+        pageImages = await pdfBufferToBase64Images(buffer, password || undefined);
+      } catch (imgErr: any) {
+        return NextResponse.json(
+          { error: `Could not render PDF pages for vision processing: ${imgErr?.message ?? "unknown error"}` },
+          { status: 400 }
+        );
+      }
+
+      if (!pageImages.length) {
+        return NextResponse.json(
+          { error: "Could not extract text or render images from this PDF. It may be corrupted." },
+          { status: 400 }
+        );
+      }
+
+      const result = await parseStatementFromImages(pageImages, source);
+      card_name = result.card_name;
+      transactions = result.transactions;
+    } else {
+      // Normal text-layer PDF — use qwen3.8 text model
+      console.log("[upload] text extracted (", rawText.length, "chars) — taking text path");
+      const result = await parseStatementWithGroq(rawText, source);
+      card_name = result.card_name;
+      transactions = result.transactions;
     }
 
-    // Parse with Groq LLM
-    const parsed = await parseStatementWithGroq(rawText, source);
-    if (!parsed.length) {
-      return NextResponse.json({ error: "No transactions found in the PDF" }, { status: 422 });
+    if (!transactions.length) {
+      return NextResponse.json(
+        { error: "No transactions found. Make sure this is a bank or credit card statement." },
+        { status: 422 }
+      );
     }
 
-    // Attach source (typed correctly)
-    const rows: Omit<Transaction, "id" | "created_at">[] = parsed.map((t) => ({
+    const rows: Omit<Transaction, "id" | "created_at">[] = transactions.map((t) => ({
       ...t,
       source,
+      card_name: card_name ?? null,
     }));
 
     await insertTransactions(rows);
 
     return NextResponse.json({
-      message: "Transactions imported successfully",
+      message: `Imported ${rows.length} transactions${card_name ? ` from ${card_name}` : ""}`,
       count: rows.length,
+      card_name,
     });
   } catch (err: any) {
     console.error("/api/upload error:", err);
-    return NextResponse.json({ error: err.message ?? "Internal server error" }, { status: 500 });
+    return NextResponse.json(
+      { error: err.message ?? "Internal server error" },
+      { status: 500 }
+    );
   }
 }

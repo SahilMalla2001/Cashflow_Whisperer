@@ -22,4 +22,5 @@ create index if not exists idx_transactions_type   on public.transactions(type);
 alter table public.transactions enable row level security;
 
 -- Allow all operations for now (update this when you add auth)
+drop policy if exists "allow_all" on public.transactions;
 create policy "allow_all" on public.transactions for all using (true) with check (true);

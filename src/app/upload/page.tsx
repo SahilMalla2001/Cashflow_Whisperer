@@ -2,12 +2,11 @@
 import { useState, useRef } from "react";
 import { Upload, FileText, CheckCircle, AlertCircle, X, Loader } from "lucide-react";
 
-type Source = "savings" | "credit_swiggy" | "credit_roarbank";
+type Source = "savings" | "credit";
 
-const SOURCE_OPTIONS: { value: Source; label: string }[] = [
-  { value: "savings", label: "Savings / Bank Account" },
-  { value: "credit_swiggy", label: "HDFC Swiggy Credit Card" },
-  { value: "credit_roarbank", label: "Roarbank Credit Card" },
+const SOURCE_OPTIONS: { value: Source; label: string; hint: string }[] = [
+  { value: "savings", label: "Savings / Bank Account", hint: "Salary credits, UPI, bank transfers" },
+  { value: "credit", label: "Credit Card", hint: "Any card — we'll detect the card name from the PDF" },
 ];
 
 interface UploadJob {
@@ -17,6 +16,7 @@ interface UploadJob {
   status: "idle" | "uploading" | "success" | "error";
   message?: string;
   count?: number;
+  cardName?: string | null;
 }
 
 export default function UploadPage() {
@@ -32,13 +32,11 @@ export default function UploadPage() {
     setJobs((prev) => [...prev, ...newJobs]);
   };
 
-  const updateJob = (idx: number, patch: Partial<UploadJob>) => {
+  const updateJob = (idx: number, patch: Partial<UploadJob>) =>
     setJobs((prev) => prev.map((j, i) => (i === idx ? { ...j, ...patch } : j)));
-  };
 
-  const removeJob = (idx: number) => {
+  const removeJob = (idx: number) =>
     setJobs((prev) => prev.filter((_, i) => i !== idx));
-  };
 
   const uploadJob = async (idx: number) => {
     const job = jobs[idx];
@@ -53,7 +51,12 @@ export default function UploadPage() {
       const res = await fetch("/api/upload", { method: "POST", body: fd });
       const data = await res.json();
       if (res.ok) {
-        updateJob(idx, { status: "success", message: data.message, count: data.count });
+        updateJob(idx, {
+          status: "success",
+          message: data.message,
+          count: data.count,
+          cardName: data.card_name,
+        });
       } else {
         updateJob(idx, { status: "error", message: data.error ?? "Upload failed" });
       }
@@ -62,11 +65,8 @@ export default function UploadPage() {
     }
   };
 
-  const uploadAll = () => {
-    jobs.forEach((j, i) => {
-      if (j.status === "idle") uploadJob(i);
-    });
-  };
+  const uploadAll = () =>
+    jobs.forEach((j, i) => { if (j.status === "idle") uploadJob(i); });
 
   const pendingCount = jobs.filter((j) => j.status === "idle").length;
 
@@ -75,8 +75,27 @@ export default function UploadPage() {
       <div className="page-header">
         <div className="page-header-left">
           <h1>Upload Statements</h1>
-          <p>Drop your bank or credit card PDFs — we'll extract &amp; categorize everything</p>
+          <p>Drop your bank or credit card PDFs — we&apos;ll extract &amp; categorize everything automatically</p>
         </div>
+      </div>
+
+      {/* Source type cards */}
+      <div className="grid-2 section" style={{ marginBottom: "24px" }}>
+        {SOURCE_OPTIONS.map((opt) => (
+          <div key={opt.value} className="card" style={{ display: "flex", gap: "12px", alignItems: "flex-start" }}>
+            <div style={{
+              width: "36px", height: "36px", borderRadius: "8px",
+              background: "var(--bg-secondary)", display: "flex",
+              alignItems: "center", justifyContent: "center", flexShrink: 0,
+            }}>
+              <FileText size={16} />
+            </div>
+            <div>
+              <div style={{ fontWeight: 600, fontSize: "0.875rem", marginBottom: "4px" }}>{opt.label}</div>
+              <div style={{ fontSize: "0.775rem", color: "var(--text-muted)" }}>{opt.hint}</div>
+            </div>
+          </div>
+        ))}
       </div>
 
       {/* Drop zone */}
@@ -89,7 +108,7 @@ export default function UploadPage() {
       >
         <Upload size={40} className="upload-zone-icon" />
         <h3>Drag &amp; drop PDF statements here</h3>
-        <p>or click to browse · Supports password-protected PDFs</p>
+        <p>or click to browse · Supports password-protected PDFs · Card name auto-detected</p>
         <input
           ref={fileInputRef}
           type="file"
@@ -122,7 +141,10 @@ export default function UploadPage() {
                 <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: "12px" }}>
                   <div style={{ display: "flex", alignItems: "center", gap: "10px", flex: 1, minWidth: 0 }}>
                     <FileText size={16} style={{ color: "var(--text-muted)", flexShrink: 0 }} />
-                    <span style={{ fontSize: "0.875rem", fontWeight: 500, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                    <span style={{
+                      fontSize: "0.875rem", fontWeight: 500,
+                      overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
+                    }}>
                       {job.file.name}
                     </span>
                     <span style={{ fontSize: "0.72rem", color: "var(--text-muted)", flexShrink: 0 }}>
@@ -138,13 +160,12 @@ export default function UploadPage() {
                       <X size={14} />
                     </button>
                   )}
-
                   {job.status === "success" && <CheckCircle size={16} style={{ color: "var(--positive)", flexShrink: 0 }} />}
                   {job.status === "error" && <AlertCircle size={16} style={{ color: "var(--negative)", flexShrink: 0 }} />}
                   {job.status === "uploading" && <div className="spinner" style={{ flexShrink: 0 }} />}
                 </div>
 
-                {/* Config row (only when idle) */}
+                {/* Config (only when idle) */}
                 {job.status === "idle" && (
                   <div style={{ display: "flex", gap: "10px", flexWrap: "wrap" }}>
                     <select
@@ -165,35 +186,36 @@ export default function UploadPage() {
                       className="input"
                       style={{ maxWidth: "200px" }}
                     />
-                    <button
-                      className="btn btn-primary btn-sm"
-                      onClick={() => uploadJob(idx)}
-                    >
+                    <button className="btn btn-primary btn-sm" onClick={() => uploadJob(idx)}>
                       Upload
                     </button>
                   </div>
                 )}
 
-                {/* Status message */}
-                {job.message && (
-                  <div style={{
-                    fontSize: "0.8125rem",
-                    color: job.status === "success" ? "var(--positive)" : "var(--negative)",
-                    display: "flex",
-                    alignItems: "center",
-                    gap: "6px",
-                  }}>
-                    {job.status === "success"
-                      ? `✓ ${job.count} transactions imported successfully`
-                      : `✗ ${job.message}`}
+                {/* Success */}
+                {job.status === "success" && (
+                  <div style={{ fontSize: "0.8125rem", color: "var(--positive)" }}>
+                    ✓ {job.count} transactions imported
+                    {job.cardName && (
+                      <span style={{ color: "var(--text-muted)", marginLeft: "6px" }}>
+                        · Detected: <strong style={{ color: "var(--text-primary)" }}>{job.cardName}</strong>
+                      </span>
+                    )}
                   </div>
                 )}
 
-                {/* Processing indicator */}
+                {/* Error */}
+                {job.status === "error" && (
+                  <div style={{ fontSize: "0.8125rem", color: "var(--negative)" }}>
+                    ✗ {job.message}
+                  </div>
+                )}
+
+                {/* Processing */}
                 {job.status === "uploading" && (
                   <div style={{ fontSize: "0.8125rem", color: "var(--text-muted)", display: "flex", alignItems: "center", gap: "6px" }}>
                     <Loader size={12} style={{ animation: "spin 1s linear infinite" }} />
-                    Extracting text → Parsing with AI → Saving to database…
+                    Extracting text → Detecting card → Parsing with AI → Saving…
                   </div>
                 )}
               </div>
@@ -202,14 +224,14 @@ export default function UploadPage() {
         </div>
       )}
 
-      {/* Instructions */}
+      {/* How it works */}
       <div className="section" style={{ marginTop: "32px" }}>
         <div className="section-title" style={{ marginBottom: "14px" }}>How it works</div>
         <div className="grid-3">
           {[
             { step: "01", title: "Upload PDF", desc: "Drop your bank or credit card statement. Password-protected PDFs are supported." },
-            { step: "02", title: "AI Parsing", desc: "Groq LLM (Llama 3) extracts every transaction and categorizes it automatically." },
-            { step: "03", title: "Instant Dashboard", desc: "Your dashboard, savings view, and credit card pages update with fresh data." },
+            { step: "02", title: "AI Parsing", desc: "Groq LLM (Llama 3) detects the card name, extracts every transaction and categorizes it." },
+            { step: "03", title: "Instant Dashboard", desc: "Your dashboard and credit card pages update automatically — new cards appear dynamically." },
           ].map(({ step, title, desc }) => (
             <div key={step} className="card">
               <div style={{ fontSize: "0.72rem", fontWeight: 700, color: "var(--text-muted)", letterSpacing: "0.1em", marginBottom: "10px" }}>

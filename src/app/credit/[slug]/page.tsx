@@ -1,15 +1,10 @@
 export const dynamic = "force-dynamic";
 
-import { getTransactions } from "@/lib/supabase";
+import { getTransactionsByCard } from "@/lib/supabase";
 import { formatCurrency, formatDate } from "@/lib/utils";
 import { notFound } from "next/navigation";
 import { ArrowLeft, CreditCard } from "lucide-react";
 import Link from "next/link";
-
-const CARD_META: Record<string, { label: string; key: "credit_swiggy" | "credit_roarbank"; limit: number }> = {
-  swiggy: { label: "HDFC Swiggy Credit Card", key: "credit_swiggy", limit: 100000 },
-  roarbank: { label: "Roarbank Credit Card", key: "credit_roarbank", limit: 50000 },
-};
 
 export default async function CardDetailPage({
   params,
@@ -17,15 +12,15 @@ export default async function CardDetailPage({
   params: Promise<{ slug: string }>;
 }) {
   const { slug } = await params;
-  const meta = CARD_META[slug];
-  if (!meta) notFound();
+  const cardName = decodeURIComponent(slug);
 
-  const txns = await getTransactions(meta.key);
+  const txns = await getTransactionsByCard(cardName);
+  if (txns.length === 0) notFound();
+
   const debits = txns.filter((t) => t.type === "debit");
   const totalSpend = debits.reduce((s, t) => s + t.amount, 0);
-  const utilization = Math.min(100, (totalSpend / meta.limit) * 100);
 
-  // Top categories
+  // Top categories by spend
   const catMap: Record<string, number> = {};
   for (const t of debits) {
     catMap[t.subcategory] = (catMap[t.subcategory] ?? 0) + t.amount;
@@ -39,20 +34,15 @@ export default async function CardDetailPage({
           <Link
             href="/credit"
             style={{
-              display: "inline-flex",
-              alignItems: "center",
-              gap: "6px",
-              fontSize: "0.8125rem",
-              color: "var(--text-muted)",
-              marginBottom: "8px",
-              textDecoration: "none",
+              display: "inline-flex", alignItems: "center", gap: "6px",
+              fontSize: "0.8125rem", color: "var(--text-muted)", marginBottom: "8px", textDecoration: "none",
             }}
           >
             <ArrowLeft size={14} />
             Back to Credit Cards
           </Link>
-          <h1>{meta.label}</h1>
-          <p>Limit: {formatCurrency(meta.limit)}</p>
+          <h1>{cardName}</h1>
+          <p>{txns.length} transactions</p>
         </div>
       </div>
 
@@ -61,44 +51,26 @@ export default async function CardDetailPage({
         <div className="stat-card">
           <div className="stat-label"><CreditCard size={12} /> Total Spend</div>
           <div className="stat-value negative">{formatCurrency(totalSpend)}</div>
-          <div className="stat-sub">{txns.length} transactions</div>
-        </div>
-        <div className="stat-card">
-          <div className="stat-label">Utilization</div>
-          <div className={`stat-value ${utilization > 30 ? "negative" : "positive"}`}>
-            {utilization.toFixed(1)}%
-          </div>
-          <div className="stat-sub">{utilization > 30 ? "High — may hurt score" : "Healthy range"}</div>
+          <div className="stat-sub">{debits.length} debit transactions</div>
         </div>
         <div className="stat-card">
           <div className="stat-label">Avg Transaction</div>
           <div className="stat-value">
             {debits.length ? formatCurrency(totalSpend / debits.length) : "—"}
           </div>
-          <div className="stat-sub">Per transaction</div>
+          <div className="stat-sub">Per debit</div>
+        </div>
+        <div className="stat-card">
+          <div className="stat-label">Credits / Payments</div>
+          <div className="stat-value positive">
+            {formatCurrency(txns.filter(t => t.type === "credit").reduce((s, t) => s + t.amount, 0))}
+          </div>
+          <div className="stat-sub">{txns.filter(t => t.type === "credit").length} credit transactions</div>
         </div>
       </div>
 
       <div className="grid-2 section">
-        {/* Utilization visual */}
-        <div className="card">
-          <div className="section-title" style={{ marginBottom: "16px" }}>Credit Utilization</div>
-          <div style={{ fontSize: "2.5rem", fontWeight: 700, letterSpacing: "-0.04em", marginBottom: "12px" }}>
-            {utilization.toFixed(1)}%
-          </div>
-          <div className="progress-bar" style={{ height: "10px" }}>
-            <div
-              className={`progress-fill ${utilization > 30 ? "red" : "green"}`}
-              style={{ width: `${utilization}%` }}
-            />
-          </div>
-          <div style={{ display: "flex", justifyContent: "space-between", marginTop: "8px", fontSize: "0.75rem", color: "var(--text-muted)" }}>
-            <span>{formatCurrency(totalSpend)} used</span>
-            <span>{formatCurrency(meta.limit - totalSpend)} available</span>
-          </div>
-        </div>
-
-        {/* Top subcategories */}
+        {/* Category breakdown */}
         <div className="card">
           <div className="section-title" style={{ marginBottom: "16px" }}>Top Spending Categories</div>
           {topCats.length > 0 ? (
@@ -117,49 +89,61 @@ export default async function CardDetailPage({
             <p style={{ color: "var(--text-muted)", fontSize: "0.875rem" }}>No data</p>
           )}
         </div>
+
+        {/* Needs vs Wants breakdown */}
+        <div className="card">
+          <div className="section-title" style={{ marginBottom: "16px" }}>Needs vs Wants</div>
+          {["Needs", "Wants", "Savings", "Loan"].map((cat) => {
+            const catTotal = debits.filter(t => t.category === cat).reduce((s, t) => s + t.amount, 0);
+            if (!catTotal) return null;
+            return (
+              <div key={cat} style={{ marginBottom: "14px" }}>
+                <div style={{ display: "flex", justifyContent: "space-between", marginBottom: "5px", fontSize: "0.8125rem" }}>
+                  <span>{cat}</span>
+                  <span style={{ fontFamily: "monospace" }}>{formatCurrency(catTotal)}</span>
+                </div>
+                <div className="progress-bar">
+                  <div className="progress-fill" style={{ width: `${(catTotal / totalSpend) * 100}%` }} />
+                </div>
+              </div>
+            );
+          })}
+        </div>
       </div>
 
       {/* Full transaction table */}
       <div className="card" style={{ padding: 0, overflow: "hidden" }}>
-        {txns.length > 0 ? (
-          <table className="data-table">
-            <thead>
-              <tr>
-                <th>Date</th>
-                <th>Description</th>
-                <th>Subcategory</th>
-                <th style={{ textAlign: "right" }}>Amount</th>
+        <table className="data-table">
+          <thead>
+            <tr>
+              <th>Date</th>
+              <th>Description</th>
+              <th>Category</th>
+              <th style={{ textAlign: "right" }}>Amount</th>
+            </tr>
+          </thead>
+          <tbody>
+            {txns.map((t) => (
+              <tr key={t.id}>
+                <td style={{ color: "var(--text-muted)", fontSize: "0.8rem", whiteSpace: "nowrap" }}>
+                  {formatDate(t.date)}
+                </td>
+                <td className="truncate" style={{ maxWidth: "240px" }}>{t.description}</td>
+                <td style={{ color: "var(--text-muted)", fontSize: "0.8125rem" }}>
+                  {t.category} · {t.subcategory}
+                </td>
+                <td style={{ textAlign: "right" }}>
+                  <span style={{
+                    fontWeight: 600, fontFamily: "monospace", fontSize: "0.8125rem",
+                    color: t.type === "credit" ? "var(--positive)" : "var(--text-primary)",
+                  }}>
+                    {t.type === "credit" ? "+" : "−"}{formatCurrency(t.amount)}
+                  </span>
+                </td>
               </tr>
-            </thead>
-            <tbody>
-              {txns.map((t) => (
-                <tr key={t.id}>
-                  <td style={{ color: "var(--text-muted)", fontSize: "0.8rem", whiteSpace: "nowrap" }}>
-                    {formatDate(t.date)}
-                  </td>
-                  <td className="truncate" style={{ maxWidth: "240px" }}>{t.description}</td>
-                  <td style={{ color: "var(--text-muted)", fontSize: "0.8125rem" }}>{t.subcategory}</td>
-                  <td style={{ textAlign: "right" }}>
-                    <span style={{
-                      fontWeight: 600,
-                      fontFamily: "monospace",
-                      fontSize: "0.8125rem",
-                      color: t.type === "credit" ? "var(--positive)" : "var(--text-primary)",
-                    }}>
-                      {t.type === "credit" ? "+" : "−"}{formatCurrency(t.amount)}
-                    </span>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        ) : (
-          <div className="empty-state">
-            <CreditCard size={36} />
-            <h3>No transactions for this card</h3>
-            <p>Upload a statement PDF to populate this view</p>
-          </div>
-        )}
+            ))}
+          </tbody>
+        </table>
       </div>
     </div>
   );

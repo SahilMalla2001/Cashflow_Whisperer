@@ -1,29 +1,5 @@
-import { createClient, SupabaseClient } from "@supabase/supabase-js";
-
-let _client: SupabaseClient | null = null;
-
-function getClient(): SupabaseClient {
-  if (_client) return _client;
-  const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
-  const key = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
-  if (!url || !key || url === "your_supabase_project_url") {
-    throw new Error(
-      "Supabase environment variables are not configured. " +
-      "Set NEXT_PUBLIC_SUPABASE_URL and NEXT_PUBLIC_SUPABASE_ANON_KEY in .env.local"
-    );
-  }
-  _client = createClient(url, key);
-  return _client;
-}
-
-// Named export for direct use (lazy)
-export const supabase = new Proxy({} as SupabaseClient, {
-  get: (_, prop) => {
-    const client = getClient();
-    const val = (client as any)[prop];
-    return typeof val === "function" ? val.bind(client) : val;
-  },
-});
+// Re-export the SSR server client factory for convenience
+export { createClient } from "@/utils/supabase/server";
 
 // ---- Types ----
 export interface Transaction {
@@ -34,12 +10,16 @@ export interface Transaction {
   type: "credit" | "debit";
   category: "Needs" | "Wants" | "Savings" | "Income" | "Loan";
   subcategory: string;
-  source: "savings" | "credit_swiggy" | "credit_roarbank";
+  source: "savings" | "credit";
+  card_name: string | null; // e.g. "HDFC Swiggy CC" — only set for credit sources
   created_at: string;
 }
 
-// ---- Queries ----
+// ---- Query Helpers ----
 export async function getTransactions(source?: string): Promise<Transaction[]> {
+  const { createClient } = await import("@/utils/supabase/server");
+  const supabase = await createClient();
+
   let q = supabase
     .from("transactions")
     .select("*")
@@ -49,10 +29,47 @@ export async function getTransactions(source?: string): Promise<Transaction[]> {
 
   const { data, error } = await q;
   if (error) {
-    console.error("getTransactions error:", error);
+    console.error("getTransactions error:", error.message, error.code);
     return [];
   }
-  return data as Transaction[];
+  return (data ?? []) as Transaction[];
+}
+
+export async function getTransactionsByCard(cardName: string): Promise<Transaction[]> {
+  const { createClient } = await import("@/utils/supabase/server");
+  const supabase = await createClient();
+
+  const { data, error } = await supabase
+    .from("transactions")
+    .select("*")
+    .eq("source", "credit")
+    .eq("card_name", cardName)
+    .order("date", { ascending: false });
+
+  if (error) {
+    console.error("getTransactionsByCard error:", error.message);
+    return [];
+  }
+  return (data ?? []) as Transaction[];
+}
+
+export async function getDistinctCards(): Promise<string[]> {
+  const { createClient } = await import("@/utils/supabase/server");
+  const supabase = await createClient();
+
+  const { data, error } = await supabase
+    .from("transactions")
+    .select("card_name")
+    .eq("source", "credit")
+    .not("card_name", "is", null);
+
+  if (error) {
+    console.error("getDistinctCards error:", error.message);
+    return [];
+  }
+
+  const names = [...new Set((data ?? []).map((r: any) => r.card_name as string))];
+  return names.filter(Boolean);
 }
 
 export async function getSummary(): Promise<{
@@ -89,7 +106,11 @@ export async function getSummary(): Promise<{
   return { totalInflow, totalOutflow, savings, savingsRate, needs, wants, savingsCategory };
 }
 
-export async function insertTransactions(txns: Omit<Transaction, "id" | "created_at">[]) {
+export async function insertTransactions(
+  txns: Omit<Transaction, "id" | "created_at">[]
+) {
+  const { createClient } = await import("@/utils/supabase/server");
+  const supabase = await createClient();
   const { error } = await supabase.from("transactions").insert(txns);
   if (error) throw new Error(error.message);
 }
