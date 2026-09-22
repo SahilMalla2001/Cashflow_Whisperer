@@ -1,7 +1,6 @@
 "use client";
-import { useState, useRef, useEffect } from "react";
-import { Bot, Send, Sparkles, User } from "lucide-react";
-import { formatCurrency } from "@/lib/utils";
+import { type ReactNode, useState, useRef, useEffect } from "react";
+import { Bot, Send } from "lucide-react";
 
 interface Message {
   role: "user" | "assistant";
@@ -16,6 +15,62 @@ const SUGGESTED = [
   "Create a budget plan for next month",
   "Am I on track to build a 6-month emergency fund?",
 ];
+
+function InlineMarkdown({ text }: { text: string }) {
+  const parts = text.split(/(\*\*[^*]+\*\*)/g);
+  return (
+    <>
+      {parts.map((part, index) =>
+        part.startsWith("**") && part.endsWith("**") ? (
+          <strong key={index}>{part.slice(2, -2)}</strong>
+        ) : (
+          <span key={index}>{part}</span>
+        )
+      )}
+    </>
+  );
+}
+
+function AdvisorMarkdown({ content }: { content: string }) {
+  const nodes: ReactNode[] = [];
+  let listItems: string[] = [];
+  let listType: "ul" | "ol" | null = null;
+
+  const flushList = () => {
+    if (!listType || !listItems.length) return;
+    const Tag = listType;
+    nodes.push(
+      <Tag key={`list-${nodes.length}`}>
+        {listItems.map((item, index) => <li key={index}><InlineMarkdown text={item} /></li>)}
+      </Tag>
+    );
+    listItems = [];
+    listType = null;
+  };
+
+  content.split("\n").forEach((line) => {
+    const heading = line.match(/^#{1,6}\s+(.+)$/);
+    const orderedItem = line.match(/^\d+\.\s+(.+)$/);
+    const bulletItem = line.match(/^[-*]\s+(.+)$/);
+
+    if (heading) {
+      flushList();
+      nodes.push(<h4 key={`heading-${nodes.length}`}><InlineMarkdown text={heading[1]} /></h4>);
+    } else if (orderedItem || bulletItem) {
+      const nextType = orderedItem ? "ol" : "ul";
+      if (listType && listType !== nextType) flushList();
+      listType = nextType;
+      listItems.push((orderedItem ?? bulletItem)![1]);
+    } else if (!line.trim()) {
+      flushList();
+    } else {
+      flushList();
+      nodes.push(<p key={`paragraph-${nodes.length}`}><InlineMarkdown text={line} /></p>);
+    }
+  });
+  flushList();
+  return <div className="advisor-markdown">{nodes}</div>;
+}
 
 export default function AIPage() {
   const [messages, setMessages] = useState<Message[]>([
@@ -69,11 +124,11 @@ export default function AIPage() {
       <div className="page-header">
         <div className="page-header-left">
           <h1>AI Financial Advisor</h1>
-          <p>Ask anything about your money — powered by Groq + Llama 3</p>
+          <p>Ask anything about your money — powered by Groq + Qwen</p>
         </div>
         <div style={{ display: "flex", alignItems: "center", gap: "6px", fontSize: "0.75rem", color: "var(--text-muted)" }}>
           <span style={{ width: "6px", height: "6px", borderRadius: "50%", background: "var(--positive)", display: "inline-block" }} />
-          Groq · llama3-70b-8192
+          Groq · qwen/qwen3.8-27b
         </div>
       </div>
 
@@ -90,7 +145,11 @@ export default function AIPage() {
                   </span>
                 </div>
               )}
-              <div style={{ whiteSpace: "pre-wrap" }}>{m.content}</div>
+              {m.role === "assistant" ? (
+                <AdvisorMarkdown content={m.content} />
+              ) : (
+                <div style={{ whiteSpace: "pre-wrap" }}>{m.content}</div>
+              )}
             </div>
           ))}
 

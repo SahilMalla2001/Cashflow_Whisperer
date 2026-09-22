@@ -8,7 +8,7 @@ A personal finance dashboard that imports bank and credit card statements via PD
 
 - **PDF Statement Import** — Upload savings or credit card statements (text-based or scanned/image-based)
 - **AI Extraction** — Groq `qwen/qwen3.8-27b` parses transactions from both text and image PDFs
-- **Smart Categorisation** — Every transaction is automatically assigned a category (Needs / Wants / Savings / Income / Loan) and subcategory
+- **Smart Categorisation** — Every transaction is automatically assigned a category (Needs / Wants / Savings / Income / Loan / Transfer) and subcategory
 - **Multi-card Support** — Track multiple credit cards and savings accounts separately
 - **50/30/20 Dashboard** — Visual breakdown of spending vs income
 - **Spending Charts** — Monthly trends, category breakdowns, and card-level analytics
@@ -64,7 +64,7 @@ SUPABASE_SERVICE_ROLE_KEY=eyJ...
 
 ### 3. Set up the database
 
-Run the following SQL in your Supabase SQL editor:
+For a new project, run [`supabase/schema.sql`](./supabase/schema.sql) in the Supabase SQL Editor. For an existing project, run `migrate_v2.sql` first and then [`migrate_v3_ingestion.sql`](./supabase/migrate_v3_ingestion.sql).
 
 ```sql
 create table transactions (
@@ -106,7 +106,7 @@ Open [http://localhost:3000](http://localhost:3000).
 | Digital / text-layer PDF | `pdf-parse` extracts text → sent to Groq as text |
 | Scanned / image-only PDF | `pdfjs-dist` renders pages to PNG → sent to Groq vision |
 
-> **Note:** For scanned PDFs, only the first 3 pages are sent to the vision model (Groq `qwen/qwen3.8-27b` limit). Statements longer than 3 pages may have incomplete imports.
+> **Note:** Vision requests contain up to three pages each, but the importer processes a scanned statement in sequential batches. Scanned statements are currently limited to 24 pages and uploads to 4.45 MB, leaving room for multipart request overhead on Vercel and Netlify. Files are SHA-256 hashed, so a previously imported statement is rejected before processing.
 
 ---
 
@@ -151,7 +151,7 @@ src/
   "groq-sdk": "^1.6.0",
   "pdf-parse": "^1.1.1",
   "pdfjs-dist": "^6.3.289",
-  "@napi-rs/canvas": "^0.1.x",
+  "@napi-rs/canvas": "^1.0.9",
   "@supabase/supabase-js": "^2.116.0",
   "recharts": "^3.10.1"
 }
@@ -161,8 +161,8 @@ src/
 
 ## 🗺 Roadmap
 
-- [ ] Chunked extraction for statements > 3 pages
-- [ ] Duplicate transaction detection
+- [x] Chunked extraction for text statements and scanned statements up to 24 pages
+- [x] Duplicate statement detection with a SHA-256 file hash
 - [ ] Rule-based categorisation engine (pre-LLM)
 - [ ] Manual category correction
 - [ ] Recurring transaction & subscription detection

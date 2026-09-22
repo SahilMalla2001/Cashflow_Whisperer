@@ -602,6 +602,18 @@ code, pre {
 .chat-bubble p { color: inherit; margin-bottom: 8px; }
 .chat-bubble p:last-child { margin-bottom: 0; }
 
+.advisor-markdown h4 {
+  color: inherit;
+  font-size: 0.95rem;
+  margin: 14px 0 6px;
+}
+
+.advisor-markdown h4:first-child { margin-top: 0; }
+.advisor-markdown p { margin: 0 0 8px; }
+.advisor-markdown ul,
+.advisor-markdown ol { margin: 0 0 12px; padding-left: 20px; }
+.advisor-markdown li { margin: 3px 0; }
+
 .chat-input-row {
   display: flex;
   gap: 10px;

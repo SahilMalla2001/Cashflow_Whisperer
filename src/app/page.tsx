@@ -16,10 +16,23 @@ import {
 
 
 
-export default async function DashboardPage() {
+export default async function DashboardPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ month?: string | string[] }>;
+}) {
+  const requestedMonth = (await searchParams).month;
+  const month = typeof requestedMonth === "string" && /^\d{4}-\d{2}$/.test(requestedMonth)
+    ? requestedMonth
+    : undefined;
+  const range = month ? (() => {
+    const [year, monthNumber] = month.split("-").map(Number);
+    const lastDay = new Date(Date.UTC(year, monthNumber, 0)).getUTCDate();
+    return { startDate: `${month}-01`, endDate: `${month}-${lastDay}` };
+  })() : undefined;
   const [summary, txns] = await Promise.all([
-    getSummary(),
-    getTransactions(),
+    getSummary(range),
+    getTransactions(undefined, range),
   ]);
 
   const { totalInflow, totalOutflow, savings, savingsRate, needs, wants, savingsCategory } = summary;
@@ -57,6 +70,16 @@ export default async function DashboardPage() {
           <h1>Dashboard</h1>
           <p>Your financial snapshot at a glance</p>
         </div>
+        <form action="/" style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+          <input
+            aria-label="Filter dashboard by month"
+            className="input"
+            defaultValue={month}
+            name="month"
+            type="month"
+          />
+          <button className="btn btn-primary btn-sm" type="submit">Apply</button>
+        </form>
       </div>
 
       {/* Summary Stats */}
@@ -67,7 +90,7 @@ export default async function DashboardPage() {
             Total Inflow
           </div>
           <div className="stat-value positive">{formatCurrency(totalInflow)}</div>
-          <div className="stat-sub">This period</div>
+          <div className="stat-sub">{month ? `Income in ${month}` : "All imported statements"}</div>
         </div>
 
         <div className="stat-card">
@@ -76,7 +99,7 @@ export default async function DashboardPage() {
             Total Outflow
           </div>
           <div className="stat-value negative">{formatCurrency(totalOutflow)}</div>
-          <div className="stat-sub">Spent &amp; transferred</div>
+          <div className="stat-sub">Consumption spending</div>
         </div>
 
         <div className="stat-card">
