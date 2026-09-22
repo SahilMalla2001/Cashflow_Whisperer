@@ -65,8 +65,12 @@ export default function UploadPage() {
     }
   };
 
-  const uploadAll = () =>
-    jobs.forEach((j, i) => { if (j.status === "idle") uploadJob(i); });
+  const uploadAll = async () => {
+    const pendingIndices = jobs
+      .map((job, index) => (job.status === "idle" ? index : -1))
+      .filter((index) => index >= 0);
+    for (const index of pendingIndices) await uploadJob(index);
+  };
 
   const pendingCount = jobs.filter((j) => j.status === "idle").length;
 
@@ -107,7 +111,7 @@ export default function UploadPage() {
         onClick={() => fileInputRef.current?.click()}
       >
         <Upload size={40} className="upload-zone-icon" />
-        <h3>Drag &amp; drop PDF statements here</h3>
+        <h3>Drag &amp; drop PDF statements here (up to 4.45 MB)</h3>
         <p>or click to browse · Supports password-protected PDFs · Card name auto-detected</p>
         <input
           ref={fileInputRef}
@@ -230,7 +234,7 @@ export default function UploadPage() {
         <div className="grid-3">
           {[
             { step: "01", title: "Upload PDF", desc: "Drop your bank or credit card statement. Password-protected PDFs are supported." },
-            { step: "02", title: "AI Parsing", desc: "Groq LLM (Llama 3) detects the card name, extracts every transaction and categorizes it." },
+            { step: "02", title: "AI Parsing", desc: "Groq Qwen detects the card name, extracts transactions and categorizes them." },
             { step: "03", title: "Instant Dashboard", desc: "Your dashboard and credit card pages update automatically — new cards appear dynamically." },
           ].map(({ step, title, desc }) => (
             <div key={step} className="card">

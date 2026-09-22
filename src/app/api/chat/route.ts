@@ -21,8 +21,8 @@ export async function POST(req: NextRequest) {
       .join("\n");
 
     const context = `
-Monthly Income: ${formatCurrency(totalInflow)}
-Total Spent: ${formatCurrency(totalOutflow)}
+Income across imported statements: ${formatCurrency(totalInflow)}
+Consumption spending across imported statements: ${formatCurrency(totalOutflow)}
 Net Savings: ${formatCurrency(savings)}
 Savings Rate: ${savingsRate.toFixed(1)}%
 Needs Spend: ${formatCurrency(needs)}

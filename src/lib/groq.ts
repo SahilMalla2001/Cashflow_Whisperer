@@ -2,12 +2,47 @@ import Groq from "groq-sdk";
 
 const groq = new Groq({ apiKey: process.env.GROQ_API_KEY });
 
+const STATEMENT_RESPONSE_FORMAT = {
+  type: "json_schema" as const,
+  json_schema: {
+    name: "statement_transactions",
+    strict: true,
+    schema: {
+      type: "object",
+      additionalProperties: false,
+      required: ["card_name", "transactions"],
+      properties: {
+        card_name: { type: ["string", "null"] },
+        transactions: {
+          type: "array",
+          items: {
+            type: "object",
+            additionalProperties: false,
+            required: ["date", "description", "amount", "type", "category", "subcategory"],
+            properties: {
+              date: { type: "string", pattern: "^\\d{4}-\\d{2}-\\d{2}$" },
+              description: { type: "string" },
+              amount: { type: "number", exclusiveMinimum: 0 },
+              type: { type: "string", enum: ["credit", "debit"] },
+              category: {
+                type: "string",
+                enum: ["Needs", "Wants", "Savings", "Income", "Loan", "Transfer"],
+              },
+              subcategory: { type: "string" },
+            },
+          },
+        },
+      },
+    },
+  },
+};
+
 export interface ParsedTransaction {
   date: string;
   description: string;
   amount: number;
   type: "credit" | "debit";
-  category: "Needs" | "Wants" | "Savings" | "Income" | "Loan";
+  category: "Needs" | "Wants" | "Savings" | "Income" | "Loan" | "Transfer";
   subcategory: string;
 }
 
@@ -28,7 +63,7 @@ Return ONLY a valid JSON object with this exact shape:
       "description": "cleaned merchant or description",
       "amount": 1234.56,
       "type": "credit or debit",
-      "category": "Needs | Wants | Savings | Income | Loan",
+      "category": "Needs | Wants | Savings | Income | Loan | Transfer",
       "subcategory": "specific sub-category"
     }
   ]
@@ -40,6 +75,7 @@ Category rules:
 - Needs: rent, utilities, groceries, medicine, transport (essentials)
 - Wants: food delivery, restaurants, entertainment, shopping, subscriptions
 - Savings: mutual funds, SIPs, FDs, investments, savings transfers
+- Transfer: money moved between the user's own accounts, credit-card bill payments, and other internal settlements. Do not classify these as spending or income.
 
 For card_name:
 - Extract the full card/account name from the statement header (e.g. "HDFC Swiggy Credit Card", "Axis Bank Ace Credit Card", "ICICI Savings Account")
@@ -60,20 +96,18 @@ export async function parseStatementWithGroq(
       { role: "system", content: EXTRACT_PROMPT },
       {
         role: "user",
-        content: `Parse this ${sourceLabel} statement and extract the card name and all transactions:\n\n${rawText.slice(0, 100000)}`,
+        content: `Parse this ${sourceLabel} statement and extract the card name and all transactions:\n\n${rawText}`,
       },
     ],
     temperature: 0.1,
     max_completion_tokens: 4096,
-    response_format: { type: "json_object" },
+    response_format: STATEMENT_RESPONSE_FORMAT,
   });
 
   const text = completion.choices[0]?.message?.content ?? "{}";
-  console.log("[groq/text] raw response (first 500):", text.slice(0, 500));
 
   try {
     const parsed = JSON.parse(text);
-    console.log("[groq/text] transactions found:", parsed.transactions?.length ?? 0);
     return {
       card_name: source === "credit" ? (parsed.card_name ?? "Unknown Credit Card") : null,
       transactions: Array.isArray(parsed.transactions) ? parsed.transactions : [],
@@ -114,15 +148,13 @@ export async function parseStatementFromImages(
     ],
     temperature: 0.1,
     max_completion_tokens: 4096,
-    response_format: { type: "json_object" },
+    response_format: STATEMENT_RESPONSE_FORMAT,
   });
 
   const text = completion.choices[0]?.message?.content ?? "{}";
-  console.log("[groq/vision] raw response (first 500):", text.slice(0, 500));
 
   try {
     const parsed = JSON.parse(text);
-    console.log("[groq/vision] transactions found:", parsed.transactions?.length ?? 0);
     return {
       card_name: source === "credit" ? (parsed.card_name ?? "Unknown Credit Card") : null,
       transactions: Array.isArray(parsed.transactions) ? parsed.transactions : [],
@@ -141,19 +173,38 @@ export async function chatWithAdvisor(
   const systemPrompt = `You are a sharp, concise personal financial advisor with access to the user's real transaction data. 
 Be direct, practical, and data-driven. Use Indian Rupee (₹) currency.
 Give specific, actionable advice based on actual numbers. Reference specific transactions when relevant.
+Use concise Markdown with short headings and lists when it improves readability.
 
 User's financial context:
 ${context}`;
 
-  const completion = await groq.chat.completions.create({
-    model: "qwen/qwen3.8-27b",
-    messages: [
-      { role: "system", content: systemPrompt },
-      ...messages,
-    ],
-    temperature: 0.7,
-    max_tokens: 1024,
-  });
+  const conversation = [...messages];
+  const parts: string[] = [];
 
-  return completion.choices[0]?.message?.content ?? "I couldn't generate a response.";
+  // A detailed financial plan can exceed one completion. Continue once when the
+  // provider explicitly reports a length stop, rather than showing a cut-off sentence.
+  for (let attempt = 0; attempt < 2; attempt++) {
+    const completion = await groq.chat.completions.create({
+      model: "qwen/qwen3.8-27b",
+      messages: [
+        { role: "system", content: systemPrompt },
+        ...conversation,
+      ],
+      temperature: 0.7,
+      max_tokens: 2048,
+    });
+
+    const choice = completion.choices[0];
+    const content = choice?.message?.content?.trim();
+    if (!content) break;
+    parts.push(content);
+
+    if (choice.finish_reason !== "length") break;
+    conversation.push(
+      { role: "assistant", content },
+      { role: "user", content: "Continue from the exact point where you stopped. Do not repeat anything." }
+    );
+  }
+
+  return parts.join("\n\n") || "I couldn't generate a response.";
 }

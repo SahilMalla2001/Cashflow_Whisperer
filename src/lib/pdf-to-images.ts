@@ -4,10 +4,12 @@
  * pdfjs-dist v6 ships a NodeCanvasFactory that uses @napi-rs/canvas.
  * We now use that directly — no custom CanvasFactory needed.
  *
- * Max 3 pages returned — Groq qwen/qwen3.8-27b allows up to 3 images per request.
+ * The caller submits the returned images in groups of three, which is Groq's
+ * vision request limit. Keep a ceiling so one hostile upload cannot exhaust
+ * the server during rendering.
  */
 
-const MAX_PAGES = 3;
+const MAX_PAGES = 24;
 const RENDER_SCALE = 1.5; // ~108 DPI — good quality vs token cost balance
 
 export async function pdfBufferToBase64Images(
@@ -21,7 +23,6 @@ export async function pdfBufferToBase64Images(
     "pdfjs-dist/legacy/build/pdf.worker.mjs";
 
   // Load the @napi-rs/canvas package (what pdfjs's NodeCanvasFactory uses internally)
-  // eslint-disable-next-line no-eval
   const napiCanvas = eval("require")("@napi-rs/canvas") as {
     createCanvas: (w: number, h: number) => any;
     DOMMatrix?: unknown;
@@ -70,8 +71,11 @@ export async function pdfBufferToBase64Images(
   });
 
   const pdfDoc = await loadingTask.promise;
-  const pagesToRender = Math.min(pdfDoc.numPages, MAX_PAGES);
-  console.log(`[pdf-to-images] PDF has ${pdfDoc.numPages} pages, rendering first ${pagesToRender}`);
+  if (pdfDoc.numPages > MAX_PAGES) {
+    await loadingTask.destroy();
+    throw new Error(`This scanned statement has ${pdfDoc.numPages} pages. The upload limit is ${MAX_PAGES} pages.`);
+  }
+  const pagesToRender = pdfDoc.numPages;
   const base64Images: string[] = [];
 
   for (let pageNum = 1; pageNum <= pagesToRender; pageNum++) {
@@ -98,17 +102,11 @@ export async function pdfBufferToBase64Images(
     const b64 = buffer.toString("base64");
     base64Images.push(b64);
 
-    // DEBUG: save to disk to verify rendering
-    const fs = await import("fs");
-    const os = await import("os");
-    const debugPath = `${os.tmpdir()}/debug_page${pageNum}.png`;
-    fs.writeFileSync(debugPath, buffer);
-    console.log(`[pdf-to-images] page ${pageNum}: ${Math.ceil(viewport.width)}x${Math.ceil(viewport.height)}px, png size=${buffer.length} bytes, saved to ${debugPath}`);
-
     page.cleanup();
   }
 
   await pdfDoc.cleanup();
+  await loadingTask.destroy();
 
   return base64Images;
 }
