@@ -7,10 +7,12 @@ import {
   CreditCard,
   Bot,
   Upload,
+  LogOut,
   Sun,
   Moon,
 } from "lucide-react";
 import { useTheme } from "./ThemeProvider";
+import { createClient } from "@/utils/supabase/client";
 
 const NAV_ITEMS = [
   { href: "/", label: "Dashboard", icon: LayoutDashboard },
@@ -23,6 +25,10 @@ const NAV_ITEMS = [
 export function Sidebar() {
   const pathname = usePathname();
   const { theme, toggle } = useTheme();
+  const signOut = async () => {
+    await createClient().auth.signOut();
+    window.location.assign("/login");
+  };
 
   return (
     <aside className="sidebar">
@@ -48,6 +54,10 @@ export function Sidebar() {
       </nav>
 
       <div className="sidebar-footer">
+        <button className="theme-toggle" onClick={signOut}>
+          <LogOut size={14} />
+          <span>Sign out</span>
+        </button>
         <button className="theme-toggle" onClick={toggle} aria-label="Toggle theme">
           {theme === "light" ? <Moon size={14} /> : <Sun size={14} />}
           <span>{theme === "light" ? "Dark mode" : "Light mode"}</span>

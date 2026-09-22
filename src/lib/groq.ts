@@ -26,7 +26,7 @@ const STATEMENT_RESPONSE_FORMAT = {
               type: { type: "string", enum: ["credit", "debit"] },
               category: {
                 type: "string",
-                enum: ["Needs", "Wants", "Savings", "Income", "Loan", "Transfer"],
+                enum: ["Needs", "Wants", "Savings", "Income", "Loan", "Transfer", "Refund"],
               },
               subcategory: { type: "string" },
             },
@@ -42,7 +42,7 @@ export interface ParsedTransaction {
   description: string;
   amount: number;
   type: "credit" | "debit";
-  category: "Needs" | "Wants" | "Savings" | "Income" | "Loan" | "Transfer";
+  category: "Needs" | "Wants" | "Savings" | "Income" | "Loan" | "Transfer" | "Refund";
   subcategory: string;
 }
 
@@ -63,7 +63,7 @@ Return ONLY a valid JSON object with this exact shape:
       "description": "cleaned merchant or description",
       "amount": 1234.56,
       "type": "credit or debit",
-      "category": "Needs | Wants | Savings | Income | Loan | Transfer",
+      "category": "Needs | Wants | Savings | Income | Loan | Transfer | Refund",
       "subcategory": "specific sub-category"
     }
   ]
@@ -76,6 +76,7 @@ Category rules:
 - Wants: food delivery, restaurants, entertainment, shopping, subscriptions
 - Savings: mutual funds, SIPs, FDs, investments, savings transfers
 - Transfer: money moved between the user's own accounts, credit-card bill payments, and other internal settlements. Do not classify these as spending or income.
+- Refund: merchant refunds, reversals, and card adjustments. Use a credit transaction for these.
 
 For card_name:
 - Extract the full card/account name from the statement header (e.g. "HDFC Swiggy Credit Card", "Axis Bank Ace Credit Card", "ICICI Savings Account")

@@ -50,8 +50,13 @@ export default async function DashboardPage({
   for (const t of txns) {
     const month = t.date.slice(0, 7); // YYYY-MM
     if (!monthlyMap[month]) monthlyMap[month] = { inflow: 0, outflow: 0 };
-    if (t.type === "credit") monthlyMap[month].inflow += t.amount;
-    else monthlyMap[month].outflow += t.amount;
+    if (t.type === "credit" && t.category === "Income") {
+      monthlyMap[month].inflow += t.amount;
+    } else if (t.type === "credit" && t.category === "Refund") {
+      monthlyMap[month].outflow -= t.amount;
+    } else if (t.type === "debit" && ["Needs", "Wants", "Loan"].includes(t.category)) {
+      monthlyMap[month].outflow += t.amount;
+    }
   }
   const chartData = Object.entries(monthlyMap)
     .sort(([a], [b]) => a.localeCompare(b))

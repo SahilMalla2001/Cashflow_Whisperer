@@ -1,6 +1,6 @@
 # 💸 Cashflow Whisperer
 
-A personal finance dashboard that imports bank and credit card statements via PDF, categorises every transaction with AI, and gives you an AI-powered financial advisor — all running on your own infrastructure.
+A personal finance dashboard that imports bank and credit card statements via PDF, categorises every transaction with AI, and gives you an AI-powered financial advisor. Statement content used for extraction is sent to Groq's API.
 
 ---
 
@@ -58,13 +58,12 @@ GROQ_API_KEY=gsk_...
 
 # Supabase
 NEXT_PUBLIC_SUPABASE_URL=https://your-project.supabase.co
-NEXT_PUBLIC_SUPABASE_ANON_KEY=eyJ...
-SUPABASE_SERVICE_ROLE_KEY=eyJ...
+NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY=sb_publishable_...
 ```
 
 ### 3. Set up the database
 
-For a new project, run [`supabase/schema.sql`](./supabase/schema.sql) in the Supabase SQL Editor. For an existing project, run `migrate_v2.sql` first and then [`migrate_v3_ingestion.sql`](./supabase/migrate_v3_ingestion.sql).
+For a new project, run [`supabase/schema.sql`](./supabase/schema.sql) in the Supabase SQL Editor. For an existing project, run `migrate_v2.sql`, `migrate_v3_ingestion.sql`, and then [`migrate_v4_auth.sql`](./supabase/migrate_v4_auth.sql). After signing in once, follow the backfill instructions in the v4 migration to assign existing records to your account.
 
 ```sql
 create table transactions (
@@ -138,8 +137,7 @@ src/
 |---|---|---|
 | `GROQ_API_KEY` | ✅ | Groq API key from [console.groq.com](https://console.groq.com) |
 | `NEXT_PUBLIC_SUPABASE_URL` | ✅ | Your Supabase project URL |
-| `NEXT_PUBLIC_SUPABASE_ANON_KEY` | ✅ | Supabase anonymous key |
-| `SUPABASE_SERVICE_ROLE_KEY` | ✅ | Supabase service role key (for server-side inserts) |
+| `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY` | ✅ | Supabase browser-safe publishable key |
 
 ---
 

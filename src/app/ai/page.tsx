@@ -104,9 +104,11 @@ export default function AIPage() {
         body: JSON.stringify({ messages: updated }),
       });
       const data = await res.json();
+      if (!res.ok) throw new Error(data.error ?? "Chat request failed");
       setMessages([...updated, { role: "assistant", content: data.reply }]);
-    } catch {
-      setMessages([...updated, { role: "assistant", content: "Sorry, something went wrong. Please try again." }]);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Sorry, something went wrong. Please try again.";
+      setMessages([...updated, { role: "assistant", content: message }]);
     } finally {
       setLoading(false);
     }

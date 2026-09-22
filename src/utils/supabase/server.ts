@@ -24,3 +24,16 @@ export const createClient = async () => {
     },
   });
 };
+
+export class AuthenticationError extends Error {
+  constructor() {
+    super("Please sign in to continue.");
+  }
+}
+
+export const requireUser = async () => {
+  const supabase = await createClient();
+  const { data: { user }, error } = await supabase.auth.getUser();
+  if (error || !user) throw new AuthenticationError();
+  return user;
+};

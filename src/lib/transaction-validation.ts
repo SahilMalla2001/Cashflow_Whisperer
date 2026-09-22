@@ -1,11 +1,11 @@
 import type { ParsedTransaction } from "@/lib/groq";
 import type { Transaction } from "@/lib/supabase";
 
-const CATEGORIES = ["Needs", "Wants", "Savings", "Income", "Loan", "Transfer"] as const;
+const CATEGORIES = ["Needs", "Wants", "Savings", "Income", "Loan", "Transfer", "Refund"] as const;
 const TYPES = ["credit", "debit"] as const;
 
 type Category = (typeof CATEGORIES)[number];
-type TransactionInput = Omit<Transaction, "id" | "created_at" | "statement_id">;
+type TransactionInput = Omit<Transaction, "id" | "created_at" | "statement_id" | "user_id">;
 
 function isIsoDate(value: unknown): value is string {
   if (typeof value !== "string" || !/^\d{4}-\d{2}-\d{2}$/.test(value)) return false;
@@ -67,19 +67,4 @@ export function validateTransactions(
   });
 
   return { rows, errors };
-}
-
-export function deduplicateTransactions<T extends TransactionInput>(transactions: T[]): T[] {
-  const seen = new Set<string>();
-  return transactions.filter((transaction) => {
-    const key = [
-      transaction.date,
-      transaction.type,
-      transaction.amount.toFixed(2),
-      transaction.description.toLocaleLowerCase("en-US").replace(/\s+/g, " ").trim(),
-    ].join("|");
-    if (seen.has(key)) return false;
-    seen.add(key);
-    return true;
-  });
 }
