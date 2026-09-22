@@ -10,7 +10,8 @@ import {
   reserveStatement,
 } from "@/lib/supabase";
 import type { Transaction } from "@/lib/supabase";
-import { deduplicateTransactions, validateTransactions } from "@/lib/transaction-validation";
+import { validateTransactions } from "@/lib/transaction-validation";
+import { AuthenticationError, requireUser } from "@/utils/supabase/server";
 
 export const runtime = "nodejs";
 
@@ -68,6 +69,7 @@ export async function POST(req: NextRequest) {
   let transactionsInserted = false;
 
   try {
+    const user = await requireUser();
     const contentLength = Number(req.headers.get("content-length"));
     if (Number.isFinite(contentLength) && contentLength > MAX_FILE_BYTES + 16_384) {
       return NextResponse.json({ error: "PDF files must be 4.45 MB or smaller." }, { status: 413 });
@@ -99,6 +101,7 @@ export async function POST(req: NextRequest) {
 
     const fileHash = createHash("sha256").update(buffer).digest("hex");
     const reservation = await reserveStatement({
+      user_id: user.id,
       file_hash: fileHash,
       filename: fileEntry.name,
       file_size: fileEntry.size,
@@ -162,9 +165,10 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    const rows = deduplicateTransactions(validation.rows).map((row) => ({
+    const rows = validation.rows.map((row) => ({
       ...row,
       statement_id: reservedStatementId,
+      user_id: user.id,
     }));
     if (!rows.length) {
       return NextResponse.json({ error: "No unique transactions found in this statement." }, { status: 422 });
@@ -181,6 +185,9 @@ export async function POST(req: NextRequest) {
       statement_id: reservedStatementId,
     });
   } catch (error: unknown) {
+    if (error instanceof AuthenticationError) {
+      return NextResponse.json({ error: error.message }, { status: 401 });
+    }
     const message = error instanceof Error ? error.message : "Internal server error";
     console.error("/api/upload error:", message);
     return NextResponse.json({ error: message }, { status: 500 });

@@ -3,11 +3,12 @@ export { createClient } from "@/utils/supabase/server";
 
 export interface Transaction {
   id: string;
+  user_id: string;
   date: string;
   description: string;
   amount: number;
   type: "credit" | "debit";
-  category: "Needs" | "Wants" | "Savings" | "Income" | "Loan" | "Transfer";
+  category: "Needs" | "Wants" | "Savings" | "Income" | "Loan" | "Transfer" | "Refund";
   subcategory: string;
   source: "savings" | "credit";
   card_name: string | null;
@@ -17,6 +18,7 @@ export interface Transaction {
 
 export interface Statement {
   id: string;
+  user_id: string;
   file_hash: string;
   filename: string;
   file_size: number;
@@ -94,6 +96,7 @@ export async function getSummary(range?: DateRange): Promise<{
   wants: number;
   savingsCategory: number;
   transfers: number;
+  loanPayments: number;
 }> {
   const transactions = await getTransactions(undefined, range);
   let totalInflow = 0;
@@ -102,10 +105,15 @@ export async function getSummary(range?: DateRange): Promise<{
   let wants = 0;
   let savingsCategory = 0;
   let transfers = 0;
+  let loanPayments = 0;
 
   for (const transaction of transactions) {
     if (transaction.type === "credit" && transaction.category === "Income") {
       totalInflow += transaction.amount;
+      continue;
+    }
+    if (transaction.type === "credit" && transaction.category === "Refund") {
+      totalOutflow -= transaction.amount;
       continue;
     }
     if (transaction.type !== "debit") continue;
@@ -113,8 +121,11 @@ export async function getSummary(range?: DateRange): Promise<{
     if (transaction.category === "Needs") {
       needs += transaction.amount;
       totalOutflow += transaction.amount;
-    } else if (transaction.category === "Wants" || transaction.category === "Loan") {
+    } else if (transaction.category === "Wants") {
       wants += transaction.amount;
+      totalOutflow += transaction.amount;
+    } else if (transaction.category === "Loan") {
+      loanPayments += transaction.amount;
       totalOutflow += transaction.amount;
     } else if (transaction.category === "Savings") {
       savingsCategory += transaction.amount;
@@ -127,7 +138,7 @@ export async function getSummary(range?: DateRange): Promise<{
   // but stay separate from spending so the dashboard can report both accurately.
   const savings = totalInflow - totalOutflow - savingsCategory;
   const savingsRate = totalInflow > 0 ? (savings / totalInflow) * 100 : 0;
-  return { totalInflow, totalOutflow, savings, savingsRate, needs, wants, savingsCategory, transfers };
+  return { totalInflow, totalOutflow, savings, savingsRate, needs, wants, savingsCategory, transfers, loanPayments };
 }
 
 export async function insertTransactions(txns: Omit<Transaction, "id" | "created_at">[]) {
@@ -138,6 +149,7 @@ export async function insertTransactions(txns: Omit<Transaction, "id" | "created
 }
 
 export async function reserveStatement(input: {
+  user_id: string;
   file_hash: string;
   filename: string;
   file_size: number;

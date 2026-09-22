@@ -27,7 +27,7 @@ export default function UploadPage() {
   const addFiles = (files: FileList | null) => {
     if (!files) return;
     const newJobs: UploadJob[] = Array.from(files)
-      .filter((f) => f.type === "application/pdf")
+      .filter((f) => f.type === "application/pdf" || f.name.toLowerCase().endsWith(".pdf"))
       .map((file) => ({ file, source: "savings", password: "", status: "idle" }));
     setJobs((prev) => [...prev, ...newJobs]);
   };

@@ -2,9 +2,11 @@ import { NextRequest, NextResponse } from "next/server";
 import { getTransactions, getSummary } from "@/lib/supabase";
 import { chatWithAdvisor } from "@/lib/groq";
 import { formatCurrency } from "@/lib/utils";
+import { AuthenticationError, requireUser } from "@/utils/supabase/server";
 
 export async function POST(req: NextRequest) {
   try {
+    await requireUser();
     const { messages } = await req.json();
 
     // Build context from real data
@@ -32,14 +34,25 @@ Recent transactions (most recent 20):
 ${txnSummary || "No transactions yet."}
     `.trim();
 
+    const safeMessages = Array.isArray(messages)
+      ? messages.filter(
+          (message): message is { role: "user" | "assistant"; content: string } =>
+            (message?.role === "user" || message?.role === "assistant") &&
+            typeof message.content === "string"
+        )
+      : [];
     const reply = await chatWithAdvisor(
-      messages.filter((m: any) => m.role === "user" || m.role === "assistant"),
+      safeMessages,
       context
     );
 
     return NextResponse.json({ reply });
-  } catch (err: any) {
-    console.error("/api/chat error:", err);
-    return NextResponse.json({ error: err.message }, { status: 500 });
+  } catch (error: unknown) {
+    if (error instanceof AuthenticationError) {
+      return NextResponse.json({ error: error.message }, { status: 401 });
+    }
+    const message = error instanceof Error ? error.message : "Internal server error";
+    console.error("/api/chat error:", message);
+    return NextResponse.json({ error: message }, { status: 500 });
   }
 }
