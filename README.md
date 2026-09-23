@@ -173,13 +173,29 @@ src/
 - [x] Duplicate statement detection with a SHA-256 file hash
 - [ ] Rule-based categorisation engine (pre-LLM)
 - [ ] Manual category correction
-- [ ] Recurring transaction & subscription detection
+- [x] Recurring monthly payment candidates (confirmation still required)
 - [ ] Net worth tracker
 - [ ] CSV export
-- [ ] Multi-user support
+- [x] Supabase authentication and per-user RLS
 
 ---
 
 ## 📄 License
 
 MIT
+
+
+## Reliability and insights upgrade
+
+Existing installations: run `supabase/migrate_v5_reliability.sql` in the Supabase SQL Editor **after v4**, before uploading with this version. Fresh installations: run `schema.sql`, then `migrate_v5_reliability.sql`. This is a transactional migration; it preserves existing transactions. It has not been applied automatically to your hosted project.
+
+- Uploads now require a stable account label. Use the same label for future statements and distinct labels for separate accounts. Account labels are case-insensitive. Older imports remain unassigned; no account identity is guessed.
+- `finalize_statement_import` inserts rows, assigns an account, stores reconciliation, and marks the statement complete atomically under the caller's RLS session. Repeated finalization is idempotent. Do not restore the former separate insert/update calls.
+- Accounts & Statements shows import history and persisted balance checks. Bank checks use opening + credits - debits; credit cards use opening + debits - credits (amounts owed). Missing/conflicting statement balances are unverified. Mismatches are saved with a visible review warning. A match does not prove semantic accuracy, categorization, or complete coverage.
+- Dashboard patterns show likely monthly payments, upcoming commitments, unusual purchase amounts, purchase frequency/size, investment contributions and income left after outgoings. Recurring candidates require at least three consistent monthly observations. Unusual purchases require five previous same-description/account purchases and a conservative median/MAD threshold. These are descriptive estimates, not confirmed liabilities or fraud detection.
+- Advisor uses bounded read-only tools over the authenticated user's imported records for date ranges, merchants, totals and paginated transaction details. It cannot see unimported history, asset balances or loan terms.
+- Text chunks are smaller and scanned pages render one at a time. The default output cap is 900 tokens; text chunks retry in smaller pieces on truncation. Set `GROQ_OUTPUT_TOKEN_BUDGET` (512?8192) only to a value your provider allowance supports. Dense scanned pages may need a higher allowance. Truncated/invalid extraction aborts the import; quota failures remain possible and show a retry message instead of raw provider details.
+- File limit remains 4.45 MB and scanned-page limit remains 24. Direct-to-storage uploads and background processing are not part of this upgrade.
+- No test cases were added. Validate the migration on your Supabase project, then upload a statement and compare the stored count and reconciliation with the source PDF. `supabase/verify_imports.sql` provides read-only count and ownership checks.
+
+Remaining limitations: same-account exact-description/date/amount overlaps are flagged for review, but rows are preserved because identical purchases can be legitimate; merchant aliases are not automatically merged; mixed scanned/text PDFs need manual completeness checks; recurring estimates are affected by incomplete imports. A process killed before finalization can leave a processing reservation; review its linked rows before clearing it. Account-level balances and transfer matching are not yet implemented. For a personal deployment disable public signup in Supabase Auth settings.

@@ -77,7 +77,7 @@ export default function AIPage() {
     {
       role: "assistant",
       content:
-        "Hi! I'm your personal financial advisor. I have access to all your transaction data. Ask me anything — from spending patterns to investment strategies. 💬",
+        "Hi! I'm your personal financial advisor. I can query your imported transactions by date and merchant. My answers depend on the statements you have imported. Ask me anything — from spending patterns to investment strategies. 💬",
     },
   ]);
   const [input, setInput] = useState("");

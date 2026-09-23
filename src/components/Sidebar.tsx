@@ -17,6 +17,7 @@ import { createClient } from "@/utils/supabase/client";
 const NAV_ITEMS = [
   { href: "/", label: "Dashboard", icon: LayoutDashboard },
   { href: "/savings", label: "Savings", icon: Landmark },
+  { href: "/accounts", label: "Accounts & Statements", icon: Landmark },
   { href: "/credit", label: "Credit Cards", icon: CreditCard },
   { href: "/ai", label: "AI Advisor", icon: Bot },
   { href: "/upload", label: "Upload PDF", icon: Upload },

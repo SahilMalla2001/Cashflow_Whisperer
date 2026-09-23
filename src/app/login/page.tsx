@@ -2,6 +2,7 @@
 
 import { FormEvent, useState } from "react";
 import { createClient } from "@/utils/supabase/client";
+import { safeRedirect } from '@/lib/safe-redirect';
 
 export default function LoginPage() {
   const [email, setEmail] = useState("");
@@ -13,7 +14,7 @@ export default function LoginPage() {
     setSending(true);
     setStatus(null);
     const next = new URLSearchParams(window.location.search).get("next");
-    const destination = next?.startsWith("/") ? next : "/";
+    const destination = safeRedirect(next, window.location.origin);
     const { error } = await createClient().auth.signInWithOtp({
       email,
       options: { emailRedirectTo: `${window.location.origin}/auth/callback?next=${encodeURIComponent(destination)}` },

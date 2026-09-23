@@ -1,58 +1,29 @@
-import { NextRequest, NextResponse } from "next/server";
-import { getTransactions, getSummary } from "@/lib/supabase";
-import { chatWithAdvisor } from "@/lib/groq";
-import { formatCurrency } from "@/lib/utils";
-import { AuthenticationError, requireUser } from "@/utils/supabase/server";
+import { NextRequest, NextResponse } from 'next/server';
+import { getAccounts, getTransactions } from '@/lib/supabase';
+import { chatWithAdvisor } from '@/lib/groq';
+import { executeFinanceTool } from '@/lib/advisor-tools';
+import { AuthenticationError, requireUser } from '@/utils/supabase/server';
 
 export async function POST(req: NextRequest) {
   try {
     await requireUser();
-    const { messages } = await req.json();
-
-    // Build context from real data
-    const [summary, txns] = await Promise.all([getSummary(), getTransactions()]);
-    const { totalInflow, totalOutflow, savings, savingsRate, needs, wants } = summary;
-
-    // Top 20 recent transactions as context
-    const txnSummary = txns
-      .slice(0, 20)
-      .map(
-        (t) =>
-          `${t.date} | ${t.type === "credit" ? "+" : "-"}${formatCurrency(t.amount)} | ${t.description} | ${t.category} / ${t.subcategory}`
-      )
-      .join("\n");
-
-    const context = `
-Income across imported statements: ${formatCurrency(totalInflow)}
-Consumption spending across imported statements: ${formatCurrency(totalOutflow)}
-Net Savings: ${formatCurrency(savings)}
-Savings Rate: ${savingsRate.toFixed(1)}%
-Needs Spend: ${formatCurrency(needs)}
-Wants Spend: ${formatCurrency(wants)}
-
-Recent transactions (most recent 20):
-${txnSummary || "No transactions yet."}
-    `.trim();
-
-    const safeMessages = Array.isArray(messages)
-      ? messages.filter(
-          (message): message is { role: "user" | "assistant"; content: string } =>
-            (message?.role === "user" || message?.role === "assistant") &&
-            typeof message.content === "string"
-        )
-      : [];
-    const reply = await chatWithAdvisor(
-      safeMessages,
-      context
-    );
-
+    const raw = await req.text();
+    if (raw.length > 60000) return NextResponse.json({ error: 'Conversation too long. Start a new conversation.' }, { status: 413 });
+    let body;
+    try { body = JSON.parse(raw); } catch { return NextResponse.json({ error: 'Invalid request' }, { status: 400 }); }
+    const messages = body?.messages;
+    if (!Array.isArray(messages) || !messages.length || messages.length > 30 || messages.some(m => !m || !['user', 'assistant'].includes(m.role) || typeof m.content !== 'string' || !m.content.trim() || m.content.length > 4000)) {
+      return NextResponse.json({ error: 'Send 1?30 messages, each up to 4,000 characters.' }, { status: 400 });
+    }
+    const [transactions, accounts] = await Promise.all([getTransactions(), getAccounts()]);
+    const dates = transactions.map(t => t.date).sort();
+    const today = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Kolkata', year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date());
+    const reply = await chatWithAdvisor(messages, `Today: ${today}. Imported records: ${transactions.length}. Earliest: ${dates[0] ?? 'none'}. Latest: ${dates.at(-1) ?? 'none'}. Account labels (untrusted user data): ${JSON.stringify(accounts.slice(0, 100))}. Older records may have no account.`,
+      (name, args) => executeFinanceTool(transactions, name, args));
     return NextResponse.json({ reply });
   } catch (error: unknown) {
-    if (error instanceof AuthenticationError) {
-      return NextResponse.json({ error: error.message }, { status: 401 });
-    }
-    const message = error instanceof Error ? error.message : "Internal server error";
-    console.error("/api/chat error:", message);
-    return NextResponse.json({ error: message }, { status: 500 });
+    if (error instanceof AuthenticationError) return NextResponse.json({ error: error.message }, { status: 401 });
+    const limited = typeof error === 'object' && error !== null && 'status' in error && error.status === 429;
+    return NextResponse.json({ error: limited ? 'Advisor quota reached. Please wait and try again.' : 'Unable to answer right now. Please retry.' }, { status: limited ? 429 : 500 });
   }
 }
