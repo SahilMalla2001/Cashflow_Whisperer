@@ -13,22 +13,25 @@ interface UploadJob {
   file: File;
   source: Source;
   password: string;
+  accountName: string;
   status: "idle" | "uploading" | "success" | "error";
   message?: string;
   count?: number;
   cardName?: string | null;
+  reconciliation?: { status: string; difference: number | null; possible_overlap_count?: number };
 }
 
 export default function UploadPage() {
   const [jobs, setJobs] = useState<UploadJob[]>([]);
   const [dragging, setDragging] = useState(false);
+  const busy = jobs.some(job => job.status === 'uploading');
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const addFiles = (files: FileList | null) => {
     if (!files) return;
     const newJobs: UploadJob[] = Array.from(files)
       .filter((f) => f.type === "application/pdf" || f.name.toLowerCase().endsWith(".pdf"))
-      .map((file) => ({ file, source: "savings", password: "", status: "idle" }));
+      .map((file) => ({ file, source: "savings", password: "", accountName: "", status: "idle" }));
     setJobs((prev) => [...prev, ...newJobs]);
   };
 
@@ -40,11 +43,16 @@ export default function UploadPage() {
 
   const uploadJob = async (idx: number) => {
     const job = jobs[idx];
+    if (!job.accountName.trim()) {
+      updateJob(idx, { status: 'error', message: 'Enter an account label before uploading.' });
+      return;
+    }
     updateJob(idx, { status: "uploading" });
 
     const fd = new FormData();
     fd.append("file", job.file);
     fd.append("source", job.source);
+    fd.append("account_name", job.accountName.trim());
     if (job.password) fd.append("password", job.password);
 
     try {
@@ -56,6 +64,7 @@ export default function UploadPage() {
           message: data.message,
           count: data.count,
           cardName: data.card_name,
+          reconciliation: data.reconciliation,
         });
       } else {
         updateJob(idx, { status: "error", message: data.error ?? "Upload failed" });
@@ -132,7 +141,7 @@ export default function UploadPage() {
               {jobs.length} file{jobs.length !== 1 ? "s" : ""} queued
             </div>
             {pendingCount > 0 && (
-              <button className="btn btn-primary btn-sm" onClick={uploadAll}>
+              <button className="btn btn-primary btn-sm" onClick={uploadAll} disabled={busy}>
                 Upload All ({pendingCount})
               </button>
             )}
@@ -159,6 +168,7 @@ export default function UploadPage() {
                   {job.status === "idle" && (
                     <button
                       onClick={() => removeJob(idx)}
+                      disabled={busy}
                       style={{ background: "none", border: "none", cursor: "pointer", color: "var(--text-muted)", padding: "2px", flexShrink: 0 }}
                     >
                       <X size={14} />
@@ -170,12 +180,15 @@ export default function UploadPage() {
                 </div>
 
                 {/* Config (only when idle) */}
-                {job.status === "idle" && (
+                {(job.status === "idle" || job.status === "error") && (
                   <div style={{ display: "flex", gap: "10px", flexWrap: "wrap" }}>
+                    <input className="input" aria-label="Account label" placeholder="Account label, e.g. HDFC salary 8921" maxLength={120} value={job.accountName} disabled={busy} onChange={e => updateJob(idx, { accountName: e.target.value })} />
+                    <p style={{ fontSize: '0.8rem' }}>Use the same label for future statements from this account; use different labels for different accounts.</p>
                     <select
                       value={job.source}
                       onChange={(e) => updateJob(idx, { source: e.target.value as Source })}
                       className="input"
+                      disabled={busy}
                       style={{ maxWidth: "240px" }}
                     >
                       {SOURCE_OPTIONS.map((o) => (
@@ -190,8 +203,8 @@ export default function UploadPage() {
                       className="input"
                       style={{ maxWidth: "200px" }}
                     />
-                    <button className="btn btn-primary btn-sm" onClick={() => uploadJob(idx)}>
-                      Upload
+                    <button className="btn btn-primary btn-sm" disabled={busy} onClick={() => uploadJob(idx)}>
+                      {job.status === 'error' ? 'Retry' : 'Upload'}
                     </button>
                   </div>
                 )}
@@ -205,6 +218,10 @@ export default function UploadPage() {
                         · Detected: <strong style={{ color: "var(--text-primary)" }}>{job.cardName}</strong>
                       </span>
                     )}
+                    <p style={{ color: 'var(--text-primary)', marginTop: 8 }}>
+                      {job.reconciliation?.status === 'matched' ? 'Extracted balances reconcile. This does not verify categorization or guarantee every row is correct.' : job.reconciliation?.status === 'mismatch' ? `Review needed: extracted balances differ by ₹${Math.abs(job.reconciliation.difference ?? 0).toFixed(2)}. Transactions were saved; compare them with your statement.` : 'Balance reconciliation unverified: usable statement balances were missing or conflicting.'}
+                    </p>
+                    {!!job.reconciliation?.possible_overlap_count && <p style={{ color: 'var(--text-primary)' }}>{job.reconciliation.possible_overlap_count} rows resemble existing transactions in this account. Review possible overlapping statements; no rows were automatically removed.</p>}
                   </div>
                 )}
 

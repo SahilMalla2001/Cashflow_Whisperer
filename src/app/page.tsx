@@ -4,6 +4,7 @@ import { getTransactions } from "@/lib/supabase";
 import { formatCurrency, pct } from "@/lib/utils";
 import { summarize } from "@/lib/insights";
 import { MonthlyInsights } from "@/components/MonthlyInsights";
+import { AdvancedInsights } from "@/components/AdvancedInsights";
 import { DashboardCharts } from "@/components/DashboardCharts";
 import {
   TrendingUp,
@@ -229,6 +230,7 @@ export default async function DashboardPage({
       </div>
 
       <MonthlyInsights transactions={allTransactions} month={insightMonth} today={today} />
+      <AdvancedInsights transactions={allTransactions} month={insightMonth} today={today} />
       <div className="grid-2 section">
         {/* Recent Transactions */}
         <div>

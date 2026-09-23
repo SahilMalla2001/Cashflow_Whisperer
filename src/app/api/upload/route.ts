@@ -2,11 +2,12 @@ import { createHash } from "node:crypto";
 import { NextRequest, NextResponse } from "next/server";
 import { parseStatementFromImages, parseStatementWithGroq } from "@/lib/groq";
 import type { ParsedTransaction } from "@/lib/groq";
-import { pdfBufferToBase64Images } from "@/lib/pdf-to-images";
+import { mergeMetadata, type StatementMetadata } from "@/lib/statement-metadata";
+import { renderPdfBatches } from "@/lib/pdf-to-images";
+import { extractTextFromPdf, pdfPasswordError } from "@/lib/pdf-document";
 import {
-  completeStatement,
+  finalizeStatement,
   discardStatement,
-  insertTransactions,
   reserveStatement,
 } from "@/lib/supabase";
 import type { Transaction } from "@/lib/supabase";
@@ -19,8 +20,7 @@ type Source = Transaction["source"];
 const VALID_SOURCES: Source[] = ["savings", "credit"];
 // Leave room for multipart form-data overhead beneath Vercel's 4.5 MB request limit.
 const MAX_FILE_BYTES = 4_450_000;
-const TEXT_CHUNK_SIZE = 20_000;
-const VISION_BATCH_SIZE = 3;
+const TEXT_CHUNK_SIZE = 2_500;
 
 function isPdf(buffer: Buffer): boolean {
   return buffer.subarray(0, 5).toString("ascii") === "%PDF-";
@@ -49,16 +49,6 @@ function splitTextIntoChunks(text: string): string[] {
   return chunks.filter((chunk) => chunk.trim());
 }
 
-async function extractTextFromPdf(buffer: Buffer, password?: string): Promise<string> {
-  // pdf-parse v1 is CommonJS. Loading it at runtime keeps Turbopack from bundling it.
-  const pdfParse = eval("require")("pdf-parse") as (
-    buf: Buffer,
-    opts?: object
-  ) => Promise<{ text: string }>;
-  const data = await pdfParse(buffer, password ? { password } : {});
-  return data.text ?? "";
-}
-
 function pickCardName(names: Array<string | null>, source: Source): string | null {
   if (source === "savings") return null;
   return names.find((name) => name && name !== "Unknown Credit Card") ?? "Unknown Credit Card";
@@ -79,6 +69,10 @@ export async function POST(req: NextRequest) {
     const fileEntry = formData.get("file");
     const rawSource = formData.get("source");
     const password = formData.get("password");
+    const accountName = formData.get("account_name");
+    if (typeof accountName !== 'string' || !accountName.trim() || accountName.trim().length > 120) {
+      return NextResponse.json({ error: 'Enter an account label (up to 120 characters). Use the same label for future statements of this account.' }, { status: 400 });
+    }
 
     if (!(fileEntry instanceof File) || typeof rawSource !== "string") {
       return NextResponse.json({ error: "Missing file or source" }, { status: 400 });
@@ -109,7 +103,7 @@ export async function POST(req: NextRequest) {
     });
     if (reservation.duplicate) {
       return NextResponse.json(
-        { error: "This statement was already imported.", statement_id: reservation.statement.id },
+        { error: reservation.statement.status === 'complete' ? 'This statement was already imported.' : 'This statement has an unfinished import. Check Accounts & Statements before retrying; a processing reservation may need review.', statement_id: reservation.statement.id },
         { status: 409 }
       );
     }
@@ -120,9 +114,10 @@ export async function POST(req: NextRequest) {
       rawText = await extractTextFromPdf(buffer, typeof password === "string" ? password || undefined : undefined);
     } catch (error: unknown) {
       const message = error instanceof Error ? error.message : "Unknown PDF parsing error";
-      if (/password|encrypted/i.test(message)) {
+      const passwordError = pdfPasswordError(error);
+      if (passwordError) {
         return NextResponse.json(
-          { error: "This PDF is password-protected. Please enter the correct password." },
+          { error: passwordError },
           { status: 400 }
         );
       }
@@ -130,21 +125,23 @@ export async function POST(req: NextRequest) {
     }
 
     const cardNames: Array<string | null> = [];
+    const metadata: StatementMetadata[] = [];
     const extractedTransactions: ParsedTransaction[] = [];
     if (rawText.trim()) {
       for (const chunk of splitTextIntoChunks(rawText)) {
         const result = await parseStatementWithGroq(chunk, source);
         cardNames.push(result.card_name);
+        metadata.push(result.metadata);
         extractedTransactions.push(...result.transactions);
       }
     } else {
-      const images = await pdfBufferToBase64Images(
+      for await (const images of renderPdfBatches(
         buffer,
         typeof password === "string" ? password || undefined : undefined
-      );
-      for (let offset = 0; offset < images.length; offset += VISION_BATCH_SIZE) {
-        const result = await parseStatementFromImages(images.slice(offset, offset + VISION_BATCH_SIZE), source);
+      )) {
+        const result = await parseStatementFromImages(images, source);
         cardNames.push(result.card_name);
+        metadata.push(result.metadata);
         extractedTransactions.push(...result.transactions);
       }
     }
@@ -171,26 +168,28 @@ export async function POST(req: NextRequest) {
       user_id: user.id,
     }));
     if (!rows.length) {
-      return NextResponse.json({ error: "No unique transactions found in this statement." }, { status: 422 });
+      return NextResponse.json({ error: "No transactions found in this statement." }, { status: 422 });
     }
 
-    await insertTransactions(rows);
+    const finalized = await finalizeStatement(reservedStatementId, rows, cardName, accountName.trim(), mergeMetadata(metadata));
     transactionsInserted = true;
-    await completeStatement(reservedStatementId, cardName, rows.length);
 
     return NextResponse.json({
       message: `Imported ${rows.length} transactions${cardName ? ` from ${cardName}` : ""}`,
       count: rows.length,
       card_name: cardName,
       statement_id: reservedStatementId,
+      reconciliation: finalized.reconciliation,
     });
   } catch (error: unknown) {
     if (error instanceof AuthenticationError) {
       return NextResponse.json({ error: error.message }, { status: 401 });
     }
+    const passwordError = pdfPasswordError(error);
+    if (passwordError) return NextResponse.json({ error: passwordError }, { status: 400 });
     const message = error instanceof Error ? error.message : "Internal server error";
-    console.error("/api/upload error:", message);
-    return NextResponse.json({ error: message }, { status: 500 });
+    const rateLimited = typeof error === 'object' && error !== null && 'status' in error && error.status === 429;
+    return NextResponse.json({ error: rateLimited ? 'Groq quota reached. Nothing was imported. Wait for your quota to reset, then retry. Dense scanned pages may require a higher output-token allowance.' : message }, { status: rateLimited ? 429 : 500 });
   } finally {
     if (reservedStatementId && !transactionsInserted) {
       await discardStatement(reservedStatementId);

@@ -13,6 +13,7 @@ export interface Transaction {
   source: "savings" | "credit";
   card_name: string | null;
   statement_id: string | null;
+  account_id?: string | null;
   created_at: string;
 }
 
@@ -58,47 +59,17 @@ export async function getTransactions(
 }
 
 export async function getTransactionsByCard(cardName: string): Promise<Transaction[]> {
-  const { createClient } = await import("@/utils/supabase/server");
-  const supabase = await createClient();
-  const { data, error } = await supabase
-    .from("transactions")
-    .select("*")
-    .eq("source", "credit")
-    .eq("card_name", cardName)
-    .order("date", { ascending: false });
-  if (error) {
-    console.error("getTransactionsByCard error:", error.message);
-    return [];
-  }
-  return (data ?? []) as Transaction[];
+  return (await getTransactions('credit')).filter(t => t.card_name === cardName);
 }
 
 export async function getDistinctCards(): Promise<string[]> {
-  const { createClient } = await import("@/utils/supabase/server");
-  const supabase = await createClient();
-  const { data, error } = await supabase
-    .from("transactions")
-    .select("card_name")
-    .eq("source", "credit")
-    .not("card_name", "is", null);
-  if (error) {
-    console.error("getDistinctCards error:", error.message);
-    return [];
-  }
-  return [...new Set((data ?? []).map((row: { card_name: string | null }) => row.card_name))]
+  return [...new Set((await getTransactions('credit')).map(t => t.card_name))]
     .filter((name): name is string => Boolean(name));
 }
 
 export async function getSummary(range?: DateRange) {
   const { summarize } = await import("./insights");
   return summarize(await getTransactions(undefined, range));
-}
-
-export async function insertTransactions(txns: Omit<Transaction, "id" | "created_at">[]) {
-  const { createClient } = await import("@/utils/supabase/server");
-  const supabase = await createClient();
-  const { error } = await supabase.from("transactions").insert(txns);
-  if (error) throw new Error(error.message);
 }
 
 export async function reserveStatement(input: {
@@ -128,24 +99,31 @@ export async function reserveStatement(input: {
   throw new Error(error.message);
 }
 
-export async function completeStatement(statementId: string, cardName: string | null, transactionCount: number) {
-  const { createClient } = await import("@/utils/supabase/server");
-  const supabase = await createClient();
-  const { error } = await supabase
-    .from("statements")
-    .update({
-      status: "complete",
-      card_name: cardName,
-      transaction_count: transactionCount,
-      completed_at: new Date().toISOString(),
-    })
-    .eq("id", statementId);
-  if (error) throw new Error(error.message);
-}
-
 export async function discardStatement(statementId: string) {
   const { createClient } = await import("@/utils/supabase/server");
   const supabase = await createClient();
-  const { error } = await supabase.from("statements").delete().eq("id", statementId);
+  const { error } = await supabase.from("statements").delete().eq("id", statementId).eq("status", "processing");
   if (error) console.error("discardStatement error:", error.message);
+}
+
+export async function finalizeStatement(statementId: string, rows: unknown[], cardName: string | null, accountName: string, metadata: import('./statement-metadata').StatementMetadata) {
+  const { createClient } = await import('@/utils/supabase/server');
+  const supabase = await createClient();
+  const { data, error } = await supabase.rpc('finalize_statement_import', {
+    p_statement_id: statementId, p_rows: rows, p_card_name: cardName,
+    p_account_name: accountName, p_metadata: metadata,
+  });
+  if (error) {
+    if (error.code === 'PGRST202') throw new Error('Database update required: run supabase/migrate_v5_reliability.sql in Supabase SQL Editor.');
+    throw new Error('Could not finalize the import. No partial import is committed. Please retry.');
+  }
+  return data as { count: number; reconciliation: { status: string; difference: number | null; possible_overlap_count: number } };
+}
+
+export async function getAccounts() {
+  const { createClient } = await import('@/utils/supabase/server');
+  const supabase = await createClient();
+  const { data, error } = await supabase.from('accounts').select('id,name,type').order('name');
+  if (error) throw new Error('Unable to load accounts. Run migrate_v5_reliability.sql if upgrading.');
+  return (data ?? []) as { id: string; name: string; type: 'savings' | 'credit' }[];
 }
