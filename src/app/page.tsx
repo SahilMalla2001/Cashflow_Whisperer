@@ -1,7 +1,9 @@
 export const dynamic = "force-dynamic";
 
-import { getSummary, getTransactions } from "@/lib/supabase";
+import { getTransactions } from "@/lib/supabase";
 import { formatCurrency, pct } from "@/lib/utils";
+import { summarize } from "@/lib/insights";
+import { MonthlyInsights } from "@/components/MonthlyInsights";
 import { DashboardCharts } from "@/components/DashboardCharts";
 import {
   TrendingUp,
@@ -10,8 +12,6 @@ import {
   PiggyBank,
   AlertCircle,
   Sparkles,
-  ArrowUpRight,
-  ArrowDownRight,
 } from "lucide-react";
 
 
@@ -22,7 +22,7 @@ export default async function DashboardPage({
   searchParams: Promise<{ month?: string | string[] }>;
 }) {
   const requestedMonth = (await searchParams).month;
-  const month = typeof requestedMonth === "string" && /^\d{4}-\d{2}$/.test(requestedMonth)
+  const month = typeof requestedMonth === "string" && /^(?:19|20)\d{2}-(?:0[1-9]|1[0-2])$/.test(requestedMonth)
     ? requestedMonth
     : undefined;
   const range = month ? (() => {
@@ -30,10 +30,11 @@ export default async function DashboardPage({
     const lastDay = new Date(Date.UTC(year, monthNumber, 0)).getUTCDate();
     return { startDate: `${month}-01`, endDate: `${month}-${lastDay}` };
   })() : undefined;
-  const [summary, txns] = await Promise.all([
-    getSummary(range),
-    getTransactions(undefined, range),
-  ]);
+  const allTransactions = await getTransactions();
+  const txns = range ? allTransactions.filter(t => t.date >= range.startDate && t.date <= range.endDate) : allTransactions;
+  const summary = summarize(txns);
+  const today = new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Kolkata", year: "numeric", month: "2-digit", day: "2-digit" }).format(new Date());
+  const insightMonth = month ?? allTransactions[0]?.date.slice(0, 7) ?? today.slice(0, 7);
 
   const { totalInflow, totalOutflow, savings, savingsRate, needs, wants, savingsCategory } = summary;
 
@@ -50,13 +51,9 @@ export default async function DashboardPage({
   for (const t of txns) {
     const month = t.date.slice(0, 7); // YYYY-MM
     if (!monthlyMap[month]) monthlyMap[month] = { inflow: 0, outflow: 0 };
-    if (t.type === "credit" && t.category === "Income") {
-      monthlyMap[month].inflow += t.amount;
-    } else if (t.type === "credit" && t.category === "Refund") {
-      monthlyMap[month].outflow -= t.amount;
-    } else if (t.type === "debit" && ["Needs", "Wants", "Loan"].includes(t.category)) {
-      monthlyMap[month].outflow += t.amount;
-    }
+    const totals = summarize([t]);
+    monthlyMap[month].inflow += totals.totalInflow;
+    monthlyMap[month].outflow += totals.totalOutflow;
   }
   const chartData = Object.entries(monthlyMap)
     .sort(([a], [b]) => a.localeCompare(b))
@@ -104,13 +101,13 @@ export default async function DashboardPage({
             Total Outflow
           </div>
           <div className="stat-value negative">{formatCurrency(totalOutflow)}</div>
-          <div className="stat-sub">Consumption spending</div>
+          <div className="stat-sub">Spending + loans − refunds</div>
         </div>
 
         <div className="stat-card">
           <div className="stat-label">
             <Wallet size={12} />
-            Net Savings
+            Cash Remaining
           </div>
           <div className={`stat-value ${savings >= 0 ? "positive" : "negative"}`}>
             {formatCurrency(Math.abs(savings))}
@@ -121,12 +118,12 @@ export default async function DashboardPage({
         <div className="stat-card">
           <div className="stat-label">
             <PiggyBank size={12} />
-            Savings Rate
+            Cash Remaining / Income
           </div>
           <div className={`stat-value ${savingsRate >= 20 ? "positive" : "negative"}`}>
             {savingsRate.toFixed(1)}%
           </div>
-          <div className="stat-sub">Benchmark: 20%</div>
+          <div className="stat-sub">After spending, loans and investments</div>
         </div>
       </div>
 
@@ -231,53 +228,8 @@ export default async function DashboardPage({
         </div>
       </div>
 
-      {/* Insights + Recent Transactions */}
+      <MonthlyInsights transactions={allTransactions} month={insightMonth} today={today} />
       <div className="grid-2 section">
-        {/* AI Insight */}
-        <div>
-          <div className="section-header">
-            <div className="section-title">
-              <Sparkles size={14} />
-              Quick Insights
-            </div>
-          </div>
-          <div style={{ display: "flex", flexDirection: "column", gap: "10px" }}>
-            {savingsRate > 60 && (
-              <div className="insight-box">
-                <div className="insight-box-header">
-                  <TrendingUp size={14} /> Exceptional Savings Rate
-                </div>
-                <p>
-                  Your {savingsRate.toFixed(1)}% savings rate is elite. At this pace, consider
-                  moving surplus into Nifty 50 index funds for compounding wealth.
-                </p>
-              </div>
-            )}
-            {wants > wants30 && (
-              <div className="insight-box">
-                <div className="insight-box-header">
-                  <AlertCircle size={14} /> Wants Over Budget
-                </div>
-                <p>
-                  Your discretionary spend ({formatCurrency(wants)}) is above the 30% guideline.
-                  Quick commerce (Swiggy, Zepto, Blinkit) is likely the main culprit.
-                </p>
-              </div>
-            )}
-            {txns.length === 0 && (
-              <div className="insight-box">
-                <div className="insight-box-header">
-                  <Sparkles size={14} /> Get Started
-                </div>
-                <p>
-                  Upload your first bank or credit card statement to unlock personalized
-                  insights and advice.
-                </p>
-              </div>
-            )}
-          </div>
-        </div>
-
         {/* Recent Transactions */}
         <div>
           <div className="section-header">

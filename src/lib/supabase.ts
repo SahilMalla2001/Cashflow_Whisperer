@@ -41,18 +41,20 @@ export async function getTransactions(
 ): Promise<Transaction[]> {
   const { createClient } = await import("@/utils/supabase/server");
   const supabase = await createClient();
-  let query = supabase.from("transactions").select("*").order("date", { ascending: false });
-
-  if (source) query = query.eq("source", source);
-  if (range?.startDate) query = query.gte("date", range.startDate);
-  if (range?.endDate) query = query.lte("date", range.endDate);
-
-  const { data, error } = await query;
-  if (error) {
-    console.error("getTransactions error:", error.message, error.code);
-    return [];
+  const rows: Transaction[] = [];
+  const pageSize = 500;
+  for (let offset = 0; ; offset += pageSize) {
+    let query = supabase.from("transactions").select("*")
+      .order("date", { ascending: false }).order("id")
+      .range(offset, offset + pageSize - 1);
+    if (source) query = query.eq("source", source);
+    if (range?.startDate) query = query.gte("date", range.startDate);
+    if (range?.endDate) query = query.lte("date", range.endDate);
+    const { data, error } = await query;
+    if (error) throw new Error("Unable to load transactions. Please retry.");
+    rows.push(...(data ?? []) as Transaction[]);
+    if (!data || data.length < pageSize) return rows;
   }
-  return (data ?? []) as Transaction[];
 }
 
 export async function getTransactionsByCard(cardName: string): Promise<Transaction[]> {
@@ -87,58 +89,9 @@ export async function getDistinctCards(): Promise<string[]> {
     .filter((name): name is string => Boolean(name));
 }
 
-export async function getSummary(range?: DateRange): Promise<{
-  totalInflow: number;
-  totalOutflow: number;
-  savings: number;
-  savingsRate: number;
-  needs: number;
-  wants: number;
-  savingsCategory: number;
-  transfers: number;
-  loanPayments: number;
-}> {
-  const transactions = await getTransactions(undefined, range);
-  let totalInflow = 0;
-  let totalOutflow = 0;
-  let needs = 0;
-  let wants = 0;
-  let savingsCategory = 0;
-  let transfers = 0;
-  let loanPayments = 0;
-
-  for (const transaction of transactions) {
-    if (transaction.type === "credit" && transaction.category === "Income") {
-      totalInflow += transaction.amount;
-      continue;
-    }
-    if (transaction.type === "credit" && transaction.category === "Refund") {
-      totalOutflow -= transaction.amount;
-      continue;
-    }
-    if (transaction.type !== "debit") continue;
-
-    if (transaction.category === "Needs") {
-      needs += transaction.amount;
-      totalOutflow += transaction.amount;
-    } else if (transaction.category === "Wants") {
-      wants += transaction.amount;
-      totalOutflow += transaction.amount;
-    } else if (transaction.category === "Loan") {
-      loanPayments += transaction.amount;
-      totalOutflow += transaction.amount;
-    } else if (transaction.category === "Savings") {
-      savingsCategory += transaction.amount;
-    } else if (transaction.category === "Transfer") {
-      transfers += transaction.amount;
-    }
-  }
-
-  // Transfers are not income or consumption. Savings/investments lower available cash,
-  // but stay separate from spending so the dashboard can report both accurately.
-  const savings = totalInflow - totalOutflow - savingsCategory;
-  const savingsRate = totalInflow > 0 ? (savings / totalInflow) * 100 : 0;
-  return { totalInflow, totalOutflow, savings, savingsRate, needs, wants, savingsCategory, transfers, loanPayments };
+export async function getSummary(range?: DateRange) {
+  const { summarize } = await import("./insights");
+  return summarize(await getTransactions(undefined, range));
 }
 
 export async function insertTransactions(txns: Omit<Transaction, "id" | "created_at">[]) {

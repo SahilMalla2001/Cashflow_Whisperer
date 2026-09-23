@@ -100,6 +100,16 @@ Open [http://localhost:3000](http://localhost:3000).
 
 ### Supported PDF types
 
+### Dashboard insights
+
+The dashboard compares the selected month with the previous month. With no month selected, insights use the latest imported transaction month; the main totals remain all-time. Current-month comparisons stop at today's day of the month in both periods (India time).
+
+Category and merchant/description tables show purchase totals and changes, with loan payments, investment contributions, and refunds displayed separately. Merchant grouping ignores case and repeated whitespace; it does not infer merchant identities. Date spans describe observed transactions, not verified statement coverage. Missing months do not produce percentage comparisons.
+
+Summary cards, charts, and comparisons share the same accounting calculations. Cash remaining means income minus spending, loan payments, and investment contributions, plus refunds; it is not an account balance or net worth. No additional AI calls or database migration are required for these insights.
+
+### PDF processing
+
 | Type | How it's handled |
 |---|---|
 | Digital / text-layer PDF | `pdf-parse` extracts text → sent to Groq as text |
