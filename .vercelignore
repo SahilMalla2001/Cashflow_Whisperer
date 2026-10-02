@@ -1,0 +1,6 @@
+# Local reference material is not application input or a public asset.
+/*.png
+/*.pdf
+.env*
+!.env.example
+.netlify/

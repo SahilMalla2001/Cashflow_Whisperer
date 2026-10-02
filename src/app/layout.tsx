@@ -5,7 +5,8 @@ import { AppShell } from "@/components/AppShell";
 
 export const metadata: Metadata = {
   title: "Cashflow Whisperer",
-  description: "Your personal 10-year financial advisor — track, analyse, and grow.",
+  description: "Understand your imported spending, accounts and statement balances.",
+  icons: { icon: '/brand-mark.svg' },
 };
 
 export default function RootLayout({

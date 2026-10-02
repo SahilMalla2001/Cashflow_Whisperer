@@ -1,5 +1,5 @@
-// Re-export the SSR server client factory for convenience.
-export { createClient } from "@/utils/supabase/server";
+import type { Category } from "./transaction-domain";
+import { createClient } from "@/utils/supabase/server";
 
 export interface Transaction {
   id: string;
@@ -8,7 +8,7 @@ export interface Transaction {
   description: string;
   amount: number;
   type: "credit" | "debit";
-  category: "Needs" | "Wants" | "Savings" | "Income" | "Loan" | "Transfer" | "Refund";
+  category: Category;
   subcategory: string;
   source: "savings" | "credit";
   card_name: string | null;
@@ -29,6 +29,28 @@ export interface Statement {
   transaction_count: number;
   created_at: string;
   completed_at: string | null;
+  account_id?: string | null;
+  reconciliation?: {
+    status: 'matched' | 'mismatch' | 'unverified';
+    opening_balance: number | null;
+    closing_balance: number | null;
+    statement_start: string | null;
+    statement_end: string | null;
+    difference: number | null;
+    possible_overlap_count?: number;
+    origin?: string;
+  } | null;
+}
+
+export async function getStatements(): Promise<Statement[]> {
+  const client = await createClient();
+  const rows: Statement[] = [];
+  for (let offset = 0; ; offset += 500) {
+    const { data, error } = await client.from('statements').select('*').order('created_at', { ascending: false }).order('id').range(offset, offset + 499);
+    if (error) throw new Error('Unable to load statement history. Please retry.');
+    rows.push(...data as Statement[]);
+    if (data.length < 500) return rows;
+  }
 }
 
 export interface DateRange {
@@ -40,7 +62,6 @@ export async function getTransactions(
   source?: Transaction["source"],
   range?: DateRange
 ): Promise<Transaction[]> {
-  const { createClient } = await import("@/utils/supabase/server");
   const supabase = await createClient();
   const rows: Transaction[] = [];
   const pageSize = 500;
@@ -58,20 +79,6 @@ export async function getTransactions(
   }
 }
 
-export async function getTransactionsByCard(cardName: string): Promise<Transaction[]> {
-  return (await getTransactions('credit')).filter(t => t.card_name === cardName);
-}
-
-export async function getDistinctCards(): Promise<string[]> {
-  return [...new Set((await getTransactions('credit')).map(t => t.card_name))]
-    .filter((name): name is string => Boolean(name));
-}
-
-export async function getSummary(range?: DateRange) {
-  const { summarize } = await import("./insights");
-  return summarize(await getTransactions(undefined, range));
-}
-
 export async function reserveStatement(input: {
   user_id: string;
   file_hash: string;
@@ -79,7 +86,6 @@ export async function reserveStatement(input: {
   file_size: number;
   source: Transaction["source"];
 }): Promise<{ statement: Statement; duplicate: boolean }> {
-  const { createClient } = await import("@/utils/supabase/server");
   const supabase = await createClient();
   const { data, error } = await supabase
     .from("statements")
@@ -100,14 +106,12 @@ export async function reserveStatement(input: {
 }
 
 export async function discardStatement(statementId: string) {
-  const { createClient } = await import("@/utils/supabase/server");
   const supabase = await createClient();
   const { error } = await supabase.from("statements").delete().eq("id", statementId).eq("status", "processing");
   if (error) console.error("discardStatement error:", error.message);
 }
 
 export async function finalizeStatement(statementId: string, rows: unknown[], cardName: string | null, accountName: string, metadata: import('./statement-metadata').StatementMetadata) {
-  const { createClient } = await import('@/utils/supabase/server');
   const supabase = await createClient();
   const { data, error } = await supabase.rpc('finalize_statement_import', {
     p_statement_id: statementId, p_rows: rows, p_card_name: cardName,
@@ -121,7 +125,6 @@ export async function finalizeStatement(statementId: string, rows: unknown[], ca
 }
 
 export async function getAccounts() {
-  const { createClient } = await import('@/utils/supabase/server');
   const supabase = await createClient();
   const { data, error } = await supabase.from('accounts').select('id,name,type').order('name');
   if (error) throw new Error('Unable to load accounts. Run migrate_v5_reliability.sql if upgrading.');

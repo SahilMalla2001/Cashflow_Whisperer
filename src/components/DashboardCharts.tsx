@@ -16,7 +16,13 @@ interface DataPoint {
   Outflow: number;
 }
 
-const CustomTooltip = ({ active, payload, label }: any) => {
+interface ChartTooltipProps {
+  active?: boolean;
+  payload?: ReadonlyArray<{ name?: string | number; value?: number | string | ReadonlyArray<number | string>; fill?: string }>;
+  label?: string | number;
+}
+
+const CustomTooltip = ({ active, payload, label }: ChartTooltipProps) => {
   if (!active || !payload?.length) return null;
   return (
     <div style={{
@@ -27,11 +33,11 @@ const CustomTooltip = ({ active, payload, label }: any) => {
       fontSize: "0.8125rem",
     }}>
       <div style={{ fontWeight: 600, marginBottom: 6 }}>{label}</div>
-      {payload.map((p: any) => (
+      {payload.map((p) => (
         <div key={p.name} style={{ display: "flex", gap: 8, alignItems: "center", marginBottom: 3 }}>
           <span style={{ width: 8, height: 8, borderRadius: 2, background: p.fill, display: "inline-block" }} />
           <span style={{ color: "var(--text-secondary)" }}>{p.name}:</span>
-          <span style={{ fontWeight: 600 }}>{formatCurrency(p.value)}</span>
+          <span style={{ fontWeight: 600 }}>{typeof p.value === 'number' ? formatCurrency(p.value) : '—'}</span>
         </div>
       ))}
     </div>

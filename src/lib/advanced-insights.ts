@@ -43,14 +43,23 @@ export function advancedInsights(transactions: Transaction[], month: string, tod
   const current = history.filter(t => t.date.startsWith(month) && purchase(t));
   const prior = history.filter(t => t.date.startsWith(monthly.previous) && Number(t.date.slice(8, 10)) <= monthly.cutoff && purchase(t));
   const mean = (rows: Transaction[]) => rows.length ? rows.reduce((sum, t) => sum + Math.round(Number(t.amount) * 100), 0) / rows.length / 100 : null;
-  const unusual = current.flatMap(t => {
-    // Only earlier months form the baseline; never let the flagged month train itself.
-    const past = history.filter(p => p.date < `${month}-01` && purchase(p) && identity(p) === identity(t)).map(p => Number(p.amount));
+  const baselines = new Map<string, number[]>();
+  for (const row of history) {
+    if (row.date >= `${month}-01` || !purchase(row)) continue;
+    const key = identity(row);
+    if (!baselines.has(key)) baselines.set(key, []);
+    baselines.get(key)!.push(Number(row.amount));
+  }
+  const thresholds = new Map([...baselines].flatMap(([key, past]) => {
     if (past.length < 5) return [];
     const center = median(past);
-    const mad = median(past.map(v => Math.abs(v - center)));
-    const threshold = center + Math.max(3 * 1.4826 * mad, center, 500);
-    return Number(t.amount) > threshold ? [{ id: t.id, name: t.description, date: t.date, amount: Number(t.amount), typical: center, observations: past.length }] : [];
+    const mad = median(past.map(value => Math.abs(value - center)));
+    return [[key, { center, threshold: center + Math.max(3 * 1.4826 * mad, center, 500), observations: past.length }] as const];
+  }));
+  const unusual = current.flatMap(t => {
+    // Only earlier months form the baseline; never let the flagged month train itself.
+    const baseline = thresholds.get(identity(t));
+    return baseline && Number(t.amount) > baseline.threshold ? [{ id: t.id, name: t.description, date: t.date, amount: Number(t.amount), typical: baseline.center, observations: baseline.observations }] : [];
   }).sort((a, b) => b.amount - a.amount).slice(0, 5);
   const upcoming = recurring.filter(r => day(r.nextDate) > day(end) && day(r.nextDate) <= day(end) + 35);
   return { recurring, unusual, upcoming, upcomingTotal: upcoming.reduce((s, r) => s + Math.round(r.amount * 100), 0) / 100,

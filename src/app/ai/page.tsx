@@ -1,6 +1,7 @@
 "use client";
 import { type ReactNode, useState, useRef, useEffect } from "react";
 import { Bot, Send } from "lucide-react";
+import { TEXT_MODEL } from '@/lib/ai-models';
 
 interface Message {
   role: "user" | "assistant";
@@ -8,12 +9,10 @@ interface Message {
 }
 
 const SUGGESTED = [
-  "How can I reduce my quick commerce spending?",
-  "Should I prepay my personal loan or invest in SIPs?",
-  "Where is most of my money going?",
-  "What's my savings rate vs last month?",
-  "Create a budget plan for next month",
-  "Am I on track to build a 6-month emergency fund?",
+  "Where did I spend most in my latest imported month?",
+  "Compare the last two imported months and explain missing coverage.",
+  "Find possible recurring payments in my imported history.",
+  "Compare my loan payments and investment contributions.",
 ];
 
 function InlineMarkdown({ text }: { text: string }) {
@@ -73,13 +72,7 @@ function AdvisorMarkdown({ content }: { content: string }) {
 }
 
 export default function AIPage() {
-  const [messages, setMessages] = useState<Message[]>([
-    {
-      role: "assistant",
-      content:
-        "Hi! I'm your personal financial advisor. I can query your imported transactions by date and merchant. My answers depend on the statements you have imported. Ask me anything — from spending patterns to investment strategies. 💬",
-    },
-  ]);
+  const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState("");
   const [loading, setLoading] = useState(false);
   const bottomRef = useRef<HTMLDivElement>(null);
@@ -101,7 +94,7 @@ export default function AIPage() {
       const res = await fetch("/api/chat", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ messages: updated }),
+        body: JSON.stringify({ messages: updated.slice(-29) }),
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error ?? "Chat request failed");
@@ -126,17 +119,18 @@ export default function AIPage() {
       <div className="page-header">
         <div className="page-header-left">
           <h1>AI Financial Advisor</h1>
-          <p>Ask anything about your money — powered by Groq + Qwen</p>
+          <p>Ask anything about your money — powered by Groq + GPT-OSS</p>
         </div>
         <div style={{ display: "flex", alignItems: "center", gap: "6px", fontSize: "0.75rem", color: "var(--text-muted)" }}>
           <span style={{ width: "6px", height: "6px", borderRadius: "50%", background: "var(--positive)", display: "inline-block" }} />
-          Groq · qwen/qwen3.8-27b
+          Groq · {TEXT_MODEL}
         </div>
       </div>
 
-      <div className="chat-container">
+      <div className={`chat-container ${messages.length === 0 ? 'chat-empty' : ''}`}>
+        {messages.length === 0 && <div className="advisor-welcome"><Bot size={32}/><h2>What would you like to understand about your money?</h2><p>Ask about spending, investments or recurring payments. Answers depend on the statements you have imported.</p></div>}
         {/* Messages */}
-        <div className="chat-messages">
+        <div className="chat-messages" aria-live="polite" hidden={messages.length === 0}>
           {messages.map((m, i) => (
             <div key={i} className={`chat-bubble ${m.role}`}>
               {m.role === "assistant" && (
@@ -173,7 +167,7 @@ export default function AIPage() {
         </div>
 
         {/* Suggested prompts (only when no user message yet) */}
-        {messages.length === 1 && (
+        {messages.length === 0 && (
           <div style={{ display: "flex", flexWrap: "wrap", gap: "8px", marginBottom: "12px" }}>
             {SUGGESTED.map((s) => (
               <button
@@ -191,6 +185,8 @@ export default function AIPage() {
         <div className="chat-input-row">
           <textarea
             className="chat-input"
+            aria-label="Message the advisor"
+            maxLength={4000}
             placeholder="Ask about your finances… (Enter to send, Shift+Enter for newline)"
             value={input}
             onChange={(e) => setInput(e.target.value)}
@@ -199,6 +195,7 @@ export default function AIPage() {
           />
           <button
             className="btn btn-primary btn-icon"
+            aria-label="Send message"
             onClick={() => send(input)}
             disabled={loading || !input.trim()}
             style={{ alignSelf: "flex-end", height: "42px", width: "42px" }}

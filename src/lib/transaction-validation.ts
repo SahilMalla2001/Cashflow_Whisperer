@@ -1,17 +1,10 @@
 import type { ParsedTransaction } from "@/lib/groq";
 import type { Transaction } from "@/lib/supabase";
+import { CATEGORIES, isIsoDate, type Category } from './transaction-domain';
 
-const CATEGORIES = ["Needs", "Wants", "Savings", "Income", "Loan", "Transfer", "Refund"] as const;
 const TYPES = ["credit", "debit"] as const;
 
-type Category = (typeof CATEGORIES)[number];
 type TransactionInput = Omit<Transaction, "id" | "created_at" | "statement_id" | "user_id">;
-
-function isIsoDate(value: unknown): value is string {
-  if (typeof value !== "string" || !/^\d{4}-\d{2}-\d{2}$/.test(value)) return false;
-  const date = new Date(`${value}T00:00:00.000Z`);
-  return !Number.isNaN(date.valueOf()) && date.toISOString().slice(0, 10) === value;
-}
 
 function cleanText(value: unknown, maxLength: number): string | null {
   if (typeof value !== "string") return null;
@@ -33,6 +26,10 @@ export function validateTransactions(
   const rows: TransactionInput[] = [];
 
   transactions.forEach((transaction, index) => {
+    if (!transaction || typeof transaction !== 'object' || Array.isArray(transaction)) {
+      errors.push(`row ${index + 1}: invalid transaction`);
+      return;
+    }
     const item = transaction as Partial<ParsedTransaction>;
     const description = cleanText(item.description, 500);
     const subcategory = cleanText(item.subcategory, 120) ?? "Uncategorized";

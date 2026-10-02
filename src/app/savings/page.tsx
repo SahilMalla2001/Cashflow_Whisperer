@@ -1,11 +1,17 @@
 export const dynamic = "force-dynamic";
 
-import { getTransactions } from "@/lib/supabase";
+import { getTransactions, getAccounts } from "@/lib/supabase";
+import { summarize } from "@/lib/insights";
+import Link from "next/link";
+import { displayMerchant } from "@/lib/presentation";
 import { formatCurrency, formatDate } from "@/lib/utils";
-import { AlertCircle, Landmark } from "lucide-react";
+import { Landmark } from "lucide-react";
 
-export default async function SavingsPage() {
-  const txns = await getTransactions("savings");
+export default async function SavingsPage({ searchParams }: { searchParams: Promise<{ account?: string }> }) {
+  const { account } = await searchParams;
+  const [all, accounts] = await Promise.all([getTransactions("savings"), getAccounts()]);
+  const txns = account ? all.filter(t => account === 'unassigned' ? !t.account_id : t.account_id === account) : all;
+  const summary = summarize(txns);
 
   const totalCredit = txns.filter(t => t.type === "credit").reduce((s, t) => s + t.amount, 0);
   const totalDebit = txns.filter(t => t.type === "debit").reduce((s, t) => s + t.amount, 0);
@@ -22,7 +28,7 @@ export default async function SavingsPage() {
     <div>
       <div className="page-header">
         <div className="page-header-left">
-          <h1>Savings Account</h1>
+          <h1>Bank account activity</h1>
           <p>Bank statement transactions — HDFC / Axis</p>
         </div>
         <div style={{ display: "flex", gap: "10px" }}>
@@ -33,7 +39,7 @@ export default async function SavingsPage() {
             padding: "8px 16px",
             fontSize: "0.8125rem",
           }}>
-            <span className="text-muted">In: </span>
+            <span className="text-muted">All credits: </span>
             <strong style={{ color: "var(--positive)" }}>{formatCurrency(totalCredit)}</strong>
           </div>
           <div style={{
@@ -43,16 +49,19 @@ export default async function SavingsPage() {
             padding: "8px 16px",
             fontSize: "0.8125rem",
           }}>
-            <span className="text-muted">Out: </span>
+            <span className="text-muted">All debits: </span>
             <strong style={{ color: "var(--negative)" }}>{formatCurrency(totalDebit)}</strong>
           </div>
         </div>
       </div>
 
+      <nav className="account-filters section"><Link className="filter-pill" href="/savings">All bank accounts</Link>{accounts.filter(a=>a.type==='savings').map(a=><Link className={`filter-pill ${account===a.id?'selected':''}`} key={a.id} href={`/savings?account=${a.id}`}>{a.name}</Link>)}<Link className="filter-pill" href="/savings?account=unassigned">Unassigned</Link></nav>
+      <div className="grid-4 section">{[['Gross purchases',summary.needs+summary.wants],['Investment debits',summary.savingsCategory],['Transfer debits',summary.transfers],['Refund credits',summary.refunds]].map(([label,value])=><div className="stat-card" key={String(label)}><div className="stat-label">{label}</div><div className="stat-value">{formatCurrency(Number(value))}</div></div>)}</div>
+      <p className="section">Transfers are money movements, not consumption. Gross purchases depend on categorization; refund credits are shown separately. <Link className="text-link" href="/review">Review categories ?</Link></p>
       {/* Category Bars */}
       {Object.keys(catMap).length > 0 && (
         <div className="card section">
-          <div className="section-title" style={{ marginBottom: "16px" }}>Spending by Category</div>
+          <div className="section-title" style={{ marginBottom: "16px" }}>Money out by type</div>
           {Object.entries(catMap)
             .sort(([, a], [, b]) => b - a)
             .map(([cat, amt]) => (
@@ -71,7 +80,7 @@ export default async function SavingsPage() {
       )}
 
       {/* Transaction Table */}
-      <div className="card" style={{ padding: 0, overflow: "hidden" }}>
+      <div className="card table-scroll" style={{ padding: 0 }}>
         {txns.length > 0 ? (
           <table className="data-table">
             <thead>
@@ -89,7 +98,7 @@ export default async function SavingsPage() {
                   <td style={{ color: "var(--text-muted)", fontSize: "0.8rem", whiteSpace: "nowrap" }}>
                     {formatDate(t.date)}
                   </td>
-                  <td className="truncate" style={{ maxWidth: "240px" }}>{t.description}</td>
+                  <td><details><summary>{displayMerchant(t.description)}</summary><p>{t.description}</p></details></td>
                   <td>
                     <span className={`badge ${
                       t.category === "Income" ? "badge-green" :

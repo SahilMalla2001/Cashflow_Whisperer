@@ -1,201 +1,85 @@
-# 💸 Cashflow Whisperer
+# Cashflow Whisperer
 
-A personal finance dashboard that imports bank and credit card statements via PDF, categorises every transaction with AI, and gives you an AI-powered financial advisor. Statement content used for extraction is sent to Groq's API.
+Personal finance dashboard for imported bank and credit-card statements. Built with Next.js, Supabase Auth/Postgres, and Groq.
 
----
+## Local setup
 
-## ✨ Features
+Use Node.js 22.13 or newer in the 22.x release line (PDF.js requires this minimum).
 
-- **PDF Statement Import** — Upload savings or credit card statements (text-based or scanned/image-based)
-- **AI Extraction** — Groq `qwen/qwen3.8-27b` parses transactions from both text and image PDFs
-- **Smart Categorisation** — Every transaction is automatically assigned a category (Needs / Wants / Savings / Income / Loan / Transfer) and subcategory
-- **Multi-card Support** — Track multiple credit cards and savings accounts separately
-- **50/30/20 Dashboard** — Visual breakdown of spending vs income
-- **Spending Charts** — Monthly trends, category breakdowns, and card-level analytics
-- **AI Financial Advisor** — Chat with an advisor that has full context of your real transaction data
-- **Password-protected PDFs** — Enter the PDF password at upload time
+1. Run `npm ci`.
+2. Copy `.env.example` to `.env.local` and fill in the three required keys.
+3. For a fresh database, run `supabase/schema.sql`, then `supabase/migrate_v5_reliability.sql` in Supabase SQL Editor. Existing installations should apply only missing migrations in order; v5 requires v4. Preserve the migration history.
+4. Configure Supabase Auth URL settings with local site URL `http://localhost:3000` and callback `http://localhost:3000/auth/callback`.
+5. Run `npm run dev` and sign in.
 
----
+For personal use, create your own Supabase Auth user and disable public signups in Supabase. Financial records are isolated by user ownership and row-level security. Do not restore permissive `allow_all` policies. Review ownerless legacy records before any reassignment.
 
-## 🛠 Tech Stack
+## Environment
 
-| Layer | Technology |
-|---|---|
-| Framework | Next.js 16 (App Router) |
-| Language | TypeScript |
-| Database | Supabase (PostgreSQL) |
-| AI / LLM | Groq API — `qwen/qwen3.8-27b` |
-| PDF text extraction | `pdf-parse` v1 |
-| PDF image rendering | `pdfjs-dist` v6 + `@napi-rs/canvas` |
-| Charts | Recharts |
-| Styling | Vanilla CSS |
+| Variable | Purpose |
+| --- | --- |
+| `NEXT_PUBLIC_SUPABASE_URL` | Supabase project URL |
+| `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY` | Browser-safe publishable key; RLS must remain enabled |
+| `GROQ_API_KEY` | Server-only Groq key |
+| `GROQ_TEXT_OUTPUT_TOKEN_BUDGET` | Optional; default 3072 |
+| `GROQ_ADVISOR_OUTPUT_TOKEN_BUDGET` | Optional; default 2048 |
+| `GROQ_VISION_OUTPUT_TOKEN_BUDGET` | Optional; default 900 |
 
----
+Token overrides accept integers 512?8192. Completion budgets include reasoning and do not increase provider allowances. The legacy `GROQ_OUTPUT_TOKEN_BUDGET` is a fallback for vision only. Never put the Groq key in a `NEXT_PUBLIC_` variable or commit real credentials.
 
-## 🚀 Getting Started
+## Imports and AI
 
-### Prerequisites
+- PDF.js extracts text and opens password-protected PDFs. GPT-OSS-120B on Groq extracts transactions from bounded text chunks.
+- Image-only statements render one page at a time using PDF.js and `@napi-rs/canvas`, then use Qwen 3.8 27B. Scans are limited to 24 pages.
+- Uploads are limited to 4.45 MB. Enter a stable account label, choose bank/card, supply the PDF password if needed, and select Upload.
+- SHA-256 prevents importing the exact same file twice for one user. Possible overlaps across different statements are flagged, not automatically deleted.
+- JSON schema extraction is followed by runtime validation. The database RPC `finalize_statement_import` saves transactions and completes the statement atomically.
+- The advisor uses GPT-OSS-120B and bounded read-only tools over the authenticated user's imported records.
 
-- Node.js 20+
-- A [Groq API key](https://console.groq.com)
-- A [Supabase](https://supabase.com) project
+Statement content required for extraction and advisor context is sent to Groq. PDFs are processed in memory; this app does not retain the original PDF in object storage. Supabase stores extracted transactions and statement metadata.
 
-### 1. Clone & install
+## Understanding the figures
 
-```bash
-git clone https://github.com/SahilMalla2001/Cashflow_Whisperer
-cd Cashflow_Whisperer
-npm install
-```
+The dashboard defaults to the latest imported month. Its period selector controls the totals; All imported history disables monthly comparisons. Current-month figures stop at today in India.
 
-### 2. Configure environment variables
+- Recorded income: credits classified as Income.
+- Spending and loans: Needs + Wants + Loan debits, minus Refund credits.
+- Imported surplus: recorded income minus spending/loans and investment contributions. This is not a bank balance or net worth.
+- Transfers are excluded from spending. Bank activity separately displays money movement; card headlines identify gross debits, not outstanding bills.
+- Bank balances are dated statement snapshots. Accounts & Statements allows review of printed balances and dates. Bank reconciliation checks opening + credits - debits; card reconciliation checks opening + debits - credits.
+- Review transactions allows category/subcategory corrections without changing amounts or original descriptions.
+- Comparisons require assigned accounts and contiguous, reconciled statement coverage for both periods. Recurring payments and unusual amounts are estimates from imported history.
 
-Create a `.env.local` file in the project root:
+Read-only SQL helpers: `verify_imports.sql` checks stored counts/ownership; `audit_dashboard.sql` reproduces totals; `review_unassigned.sql` inspects ownerless legacy records. SQL Editor can see other users' records: do not publish its results.
 
-```env
-# Groq
-GROQ_API_KEY=gsk_...
+## Deployment
 
-# Supabase
-NEXT_PUBLIC_SUPABASE_URL=https://your-project.supabase.co
-NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY=sb_publishable_...
-```
+Vercel is the recommended first target for this synchronous import pipeline.
 
-### 3. Set up the database
+1. Import the repository with the Next.js preset and Node.js 22.x. Install: `npm ci`; build: `npm run build`. Let the preset determine the output directory.
+2. Set the required environment variables in the hosting dashboard for the intended environment. Local `.env.local` is not uploaded.
+3. Enable/check Fluid Compute. Upload and chat routes declare `maxDuration = 300`; your plan's actual limit still applies. See [Vercel function limits](https://vercel.com/docs/functions/limitations).
+4. In Supabase Auth, set the production Site URL and allow the deployed `https://your-domain/auth/callback`. Add only trusted preview callbacks when needed.
+5. After deployment, verify sign-in/out, text and password-protected imports, a scanned page, card details, and advisor responses. Compare imported rows and balances against the source statement.
 
-For a new project, run [`supabase/schema.sql`](./supabase/schema.sql) in the Supabase SQL Editor. For an existing project, run `migrate_v2.sql`, `migrate_v3_ingestion.sql`, and then [`migrate_v4_auth.sql`](./supabase/migrate_v4_auth.sql). After signing in once, follow the backfill instructions in the v4 migration to assign existing records to your account.
+Netlify is possible, but its [synchronous function limit](https://docs.netlify.com/build/functions/configuration/) is 60 seconds. Groq waits and multi-page imports can exceed that; use a background processing design before relying on lengthy imports there. A larger AI-provider document limit does not remove the hosting request-body limit.
 
-```sql
-create table transactions (
-  id uuid primary key default gen_random_uuid(),
-  created_at timestamptz default now(),
-  date date not null,
-  description text not null,
-  amount numeric(12, 2) not null,
-  type text check (type in ('credit', 'debit')),
-  category text check (category in ('Needs', 'Wants', 'Savings', 'Income', 'Loan')),
-  subcategory text,
-  source text not null,
-  card_name text
-);
-```
+The native renderer must be included in the Linux deployment bundle. Local Windows builds do not prove hosted PDF rendering works. Root-level PDF samples/screenshots and local environment files are excluded from Git/Vercel uploads; public branding remains included.
 
-### 4. Run the dev server
+## Checks and remaining limits
 
-```bash
-npm run dev
-```
+Run `npm run lint` and `npm run build` before deployment. No automated test cases are included.
 
-Open [http://localhost:3000](http://localhost:3000).
+- Free-tier Groq rate limits still apply. The SDK retries once using retry headers; exhausted retries fail without a partial transaction import.
+- Imports have no durable resume queue. A platform timeout can leave a processing reservation; inspect its linked rows before clearing it.
+- Mixed text/scanned PDFs require manual completeness review. A balance match does not prove all rows or classifications are correct.
+- Overlapping imports, missing statements, refund classification and unpaired transfers can affect analytics.
+- No direct-to-storage uploads, live bank connections, or loan/investment balances are implemented.
 
----
+## Source layout
 
-## 📤 Uploading Statements
-
-1. Navigate to **Upload** in the sidebar
-2. Select **Savings Account** or **Credit Card**
-3. Drop your PDF (or click to browse)
-4. If the PDF is password-protected, enter the password
-5. Click **Upload & Import**
-
-### Supported PDF types
-
-### Dashboard insights
-
-The dashboard compares the selected month with the previous month. With no month selected, insights use the latest imported transaction month; the main totals remain all-time. Current-month comparisons stop at today's day of the month in both periods (India time).
-
-Category and merchant/description tables show purchase totals and changes, with loan payments, investment contributions, and refunds displayed separately. Merchant grouping ignores case and repeated whitespace; it does not infer merchant identities. Date spans describe observed transactions, not verified statement coverage. Missing months do not produce percentage comparisons.
-
-Summary cards, charts, and comparisons share the same accounting calculations. Cash remaining means income minus spending, loan payments, and investment contributions, plus refunds; it is not an account balance or net worth. No additional AI calls or database migration are required for these insights.
-
-### PDF processing
-
-| Type | How it's handled |
-|---|---|
-| Digital / text-layer PDF | `pdf-parse` extracts text → sent to Groq as text |
-| Scanned / image-only PDF | `pdfjs-dist` renders pages to PNG → sent to Groq vision |
-
-> **Note:** Vision requests contain up to three pages each, but the importer processes a scanned statement in sequential batches. Scanned statements are currently limited to 24 pages and uploads to 4.45 MB, leaving room for multipart request overhead on Vercel and Netlify. Files are SHA-256 hashed, so a previously imported statement is rejected before processing.
-
----
-
-## 🏗 Project Structure
-
-```
-src/
-├── app/
-│   ├── page.tsx              # Dashboard (50/30/20 summary, charts)
-│   ├── upload/               # Upload page
-│   ├── savings/              # Savings account transaction view
-│   ├── credit/               # Credit card transaction view
-│   ├── ai/                   # AI Financial Advisor chat
-│   └── api/
-│       ├── upload/route.ts   # PDF → transactions pipeline
-│       └── chat/             # AI advisor API
-├── lib/
-│   ├── groq.ts               # Groq API (text extraction, vision extraction, chat)
-│   ├── pdf-to-images.ts      # PDF → PNG rendering (pdfjs + @napi-rs/canvas)
-│   └── supabase.ts           # Supabase client & data helpers
-└── components/               # Reusable UI components
-```
-
----
-
-## 🔑 Environment Variables
-
-| Variable | Required | Description |
-|---|---|---|
-| `GROQ_API_KEY` | ✅ | Groq API key from [console.groq.com](https://console.groq.com) |
-| `NEXT_PUBLIC_SUPABASE_URL` | ✅ | Your Supabase project URL |
-| `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY` | ✅ | Supabase browser-safe publishable key |
-
----
-
-## 📦 Key Dependencies
-
-```json
-{
-  "next": "16.3.5",
-  "groq-sdk": "^1.6.0",
-  "pdf-parse": "^1.1.1",
-  "pdfjs-dist": "^6.3.289",
-  "@napi-rs/canvas": "^1.0.9",
-  "@supabase/supabase-js": "^2.116.0",
-  "recharts": "^3.10.1"
-}
-```
-
----
-
-## 🗺 Roadmap
-
-- [x] Chunked extraction for text statements and scanned statements up to 24 pages
-- [x] Duplicate statement detection with a SHA-256 file hash
-- [ ] Rule-based categorisation engine (pre-LLM)
-- [ ] Manual category correction
-- [x] Recurring monthly payment candidates (confirmation still required)
-- [ ] Net worth tracker
-- [ ] CSV export
-- [x] Supabase authentication and per-user RLS
-
----
-
-## 📄 License
-
-MIT
-
-
-## Reliability and insights upgrade
-
-Existing installations: run `supabase/migrate_v5_reliability.sql` in the Supabase SQL Editor **after v4**, before uploading with this version. Fresh installations: run `schema.sql`, then `migrate_v5_reliability.sql`. This is a transactional migration; it preserves existing transactions. It has not been applied automatically to your hosted project.
-
-- Uploads now require a stable account label. Use the same label for future statements and distinct labels for separate accounts. Account labels are case-insensitive. Older imports remain unassigned; no account identity is guessed.
-- `finalize_statement_import` inserts rows, assigns an account, stores reconciliation, and marks the statement complete atomically under the caller's RLS session. Repeated finalization is idempotent. Do not restore the former separate insert/update calls.
-- Accounts & Statements shows import history and persisted balance checks. Bank checks use opening + credits - debits; credit cards use opening + debits - credits (amounts owed). Missing/conflicting statement balances are unverified. Mismatches are saved with a visible review warning. A match does not prove semantic accuracy, categorization, or complete coverage.
-- Dashboard patterns show likely monthly payments, upcoming commitments, unusual purchase amounts, purchase frequency/size, investment contributions and income left after outgoings. Recurring candidates require at least three consistent monthly observations. Unusual purchases require five previous same-description/account purchases and a conservative median/MAD threshold. These are descriptive estimates, not confirmed liabilities or fraud detection.
-- Advisor uses bounded read-only tools over the authenticated user's imported records for date ranges, merchants, totals and paginated transaction details. It cannot see unimported history, asset balances or loan terms.
-- Text chunks are smaller and scanned pages render one at a time. The default output cap is 900 tokens; text chunks retry in smaller pieces on truncation. Set `GROQ_OUTPUT_TOKEN_BUDGET` (512?8192) only to a value your provider allowance supports. Dense scanned pages may need a higher allowance. Truncated/invalid extraction aborts the import; quota failures remain possible and show a retry message instead of raw provider details.
-- File limit remains 4.45 MB and scanned-page limit remains 24. Direct-to-storage uploads and background processing are not part of this upgrade.
-- No test cases were added. Validate the migration on your Supabase project, then upload a statement and compare the stored count and reconciliation with the source PDF. `supabase/verify_imports.sql` provides read-only count and ownership checks.
-
-Remaining limitations: same-account exact-description/date/amount overlaps are flagged for review, but rows are preserved because identical purchases can be legitimate; merchant aliases are not automatically merged; mixed scanned/text PDFs need manual completeness checks; recurring estimates are affected by incomplete imports. A process killed before finalization can leave a processing reservation; review its linked rows before clearing it. Account-level balances and transfer matching are not yet implemented. For a personal deployment disable public signup in Supabase Auth settings.
+- `src/app`: pages, authenticated API routes and auth callback.
+- `src/components`: shared UI, charts and review forms.
+- `src/lib`: extraction, validation, accounting, insights and database helpers.
+- `src/utils/supabase`: browser/server session clients.
+- `supabase`: schema, ordered migrations and read-only audits.

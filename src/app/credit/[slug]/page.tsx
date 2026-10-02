@@ -1,6 +1,7 @@
 export const dynamic = "force-dynamic";
 
-import { getTransactionsByCard } from "@/lib/supabase";
+import { getTransactions } from "@/lib/supabase";
+import { resolveCardName } from '@/lib/card-route';
 import { formatCurrency, formatDate } from "@/lib/utils";
 import { notFound } from "next/navigation";
 import { ArrowLeft, CreditCard } from "lucide-react";
@@ -12,9 +13,10 @@ export default async function CardDetailPage({
   params: Promise<{ slug: string }>;
 }) {
   const { slug } = await params;
-  const cardName = decodeURIComponent(slug);
-
-  const txns = await getTransactionsByCard(cardName);
+  const allCards = await getTransactions('credit');
+  const cardName = resolveCardName(slug, allCards.map(t => t.card_name));
+  if (!cardName) notFound();
+  const txns = allCards.filter(t => t.card_name === cardName);
   if (txns.length === 0) notFound();
 
   const debits = txns.filter((t) => t.type === "debit");
@@ -49,8 +51,8 @@ export default async function CardDetailPage({
       {/* Stats */}
       <div className="grid-3 section">
         <div className="stat-card">
-          <div className="stat-label"><CreditCard size={12} /> Total Spend</div>
-          <div className="stat-value negative">{formatCurrency(totalSpend)}</div>
+          <div className="stat-label"><CreditCard size={12} /> Gross card debits</div>
+          <div className="stat-value">{formatCurrency(totalSpend)}</div>
           <div className="stat-sub">{debits.length} debit transactions</div>
         </div>
         <div className="stat-card">
@@ -112,7 +114,7 @@ export default async function CardDetailPage({
       </div>
 
       {/* Full transaction table */}
-      <div className="card" style={{ padding: 0, overflow: "hidden" }}>
+      <div className="card table-scroll" style={{ padding: 0 }}>
         <table className="data-table">
           <thead>
             <tr>

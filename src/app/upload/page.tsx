@@ -1,4 +1,5 @@
 "use client";
+import Link from "next/link";
 import { useState, useRef } from "react";
 import { Upload, FileText, CheckCircle, AlertCircle, X, Loader } from "lucide-react";
 
@@ -18,6 +19,7 @@ interface UploadJob {
   message?: string;
   count?: number;
   cardName?: string | null;
+  statementId?: string;
   reconciliation?: { status: string; difference: number | null; possible_overlap_count?: number };
 }
 
@@ -65,6 +67,7 @@ export default function UploadPage() {
           count: data.count,
           cardName: data.card_name,
           reconciliation: data.reconciliation,
+          statementId: data.statement_id,
         });
       } else {
         updateJob(idx, { status: "error", message: data.error ?? "Upload failed" });
@@ -95,7 +98,7 @@ export default function UploadPage() {
       {/* Source type cards */}
       <div className="grid-2 section" style={{ marginBottom: "24px" }}>
         {SOURCE_OPTIONS.map((opt) => (
-          <div key={opt.value} className="card" style={{ display: "flex", gap: "12px", alignItems: "flex-start" }}>
+          <div key={opt.value} className="source-help" style={{ display: "flex", gap: "12px", alignItems: "flex-start" }}>
             <div style={{
               width: "36px", height: "36px", borderRadius: "8px",
               background: "var(--bg-secondary)", display: "flex",
@@ -213,6 +216,7 @@ export default function UploadPage() {
                 {job.status === "success" && (
                   <div style={{ fontSize: "0.8125rem", color: "var(--positive)" }}>
                     ✓ {job.count} transactions imported
+                    {job.statementId && <p><Link className="text-link" href={`/review?statement=${job.statementId}`}>View imported transactions →</Link></p>}
                     {job.cardName && (
                       <span style={{ color: "var(--text-muted)", marginLeft: "6px" }}>
                         · Detected: <strong style={{ color: "var(--text-primary)" }}>{job.cardName}</strong>
@@ -251,7 +255,7 @@ export default function UploadPage() {
         <div className="grid-3">
           {[
             { step: "01", title: "Upload PDF", desc: "Drop your bank or credit card statement. Password-protected PDFs are supported." },
-            { step: "02", title: "AI Parsing", desc: "Groq Qwen detects the card name, extracts transactions and categorizes them." },
+            { step: "02", title: "AI Parsing", desc: "Groq uses GPT-OSS for text statements and Qwen for scanned pages to extract and categorize transactions." },
             { step: "03", title: "Instant Dashboard", desc: "Your dashboard and credit card pages update automatically — new cards appear dynamically." },
           ].map(({ step, title, desc }) => (
             <div key={step} className="card">

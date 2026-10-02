@@ -17,11 +17,11 @@ export function summarize(transactions: Transaction[]) {
   }
   totals.totalOutflow = totals.needs + totals.wants + totals.loanPayments - totals.refunds;
   const savings = totals.totalInflow - totals.totalOutflow - totals.savingsCategory;
-  const savingsRate = totals.totalInflow > 0 ? savings / totals.totalInflow * 100 : 0;
+  const savingsRate = totals.totalInflow > 0 ? savings / totals.totalInflow * 100 : null;
   return { ...Object.fromEntries(Object.entries(totals).map(([key, value]) => [key, value / 100])) as typeof totals, savings: savings / 100, savingsRate };
 }
 
-export function monthlyInsights(transactions: Transaction[], month: string, today: string) {
+export function monthlyInsights(transactions: Transaction[], month: string, today: string, compare = true) {
   const [year, number] = month.split("-").map(Number);
   const previous = new Date(Date.UTC(year, number - 2, 1)).toISOString().slice(0, 7);
   const cutoff = month === today.slice(0, 7) ? Number(today.slice(8, 10)) : 31;
@@ -43,7 +43,7 @@ export function monthlyInsights(transactions: Transaction[], month: string, toda
     const now = groups(currentRows, merchant);
     const before = groups(previousRows, merchant);
     return [...new Set([...now.keys(), ...before.keys()])].map(name => ({ name, amount: (now.get(name) ?? 0) / 100, change: ((now.get(name) ?? 0) - (before.get(name) ?? 0)) / 100 }))
-      .sort((a, b) => previousRows.length ? b.change - a.change : b.amount - a.amount).slice(0, 5);
+      .sort((a, b) => compare && previousRows.length ? b.change - a.change : b.amount - a.amount).slice(0, 5);
   };
   const coverage = (rows: Transaction[]) => {
     const dates = rows.map(t => t.date).sort();

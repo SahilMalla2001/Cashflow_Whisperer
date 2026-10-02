@@ -1,6 +1,7 @@
 "use client";
 import Link from "next/link";
-import { usePathname } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
+import { Brand } from './Brand';
 import {
   LayoutDashboard,
   Landmark,
@@ -25,17 +26,18 @@ const NAV_ITEMS = [
 
 export function Sidebar() {
   const pathname = usePathname();
+  const router = useRouter();
   const { theme, toggle } = useTheme();
   const signOut = async () => {
     await createClient().auth.signOut();
-    window.location.assign("/login");
+    router.replace('/login');
+    router.refresh();
   };
 
   return (
     <aside className="sidebar">
       <div className="sidebar-logo">
-        <div className="sidebar-logo-text">Cashflow Whisperer</div>
-        <div className="sidebar-logo-sub">10-year financial advisor</div>
+        <Brand />
       </div>
 
       <nav className="sidebar-nav">
@@ -45,6 +47,8 @@ export function Sidebar() {
             <Link
               key={href}
               href={href}
+              aria-label={label}
+              title={label}
               className={isActive ? "active" : ""}
             >
               <Icon size={15} className="sidebar-nav-icon" />

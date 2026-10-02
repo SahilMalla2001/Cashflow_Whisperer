@@ -2,6 +2,7 @@
 
 import { FormEvent, useState } from "react";
 import { createClient } from "@/utils/supabase/client";
+import { Brand } from "@/components/Brand";
 import { safeRedirect } from '@/lib/safe-redirect';
 
 export default function LoginPage() {
@@ -26,7 +27,7 @@ export default function LoginPage() {
   return (
     <main className="login-page">
       <form className="login-card" onSubmit={submit}>
-        <p className="login-kicker">Cashflow Whisperer</p>
+        <Brand />
         <h1>Sign in to your finances</h1>
         <p>We’ll email you a secure sign-in link. Only signed-in users can access financial data.</p>
         <label htmlFor="email">Email address</label>
