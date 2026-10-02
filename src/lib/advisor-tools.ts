@@ -1,3 +1,4 @@
+import { isIsoDate } from '@/lib/transaction-domain';
 import type { ChatCompletionTool } from 'groq-sdk/resources/chat/completions';
 import type { Transaction } from './supabase';
 import { summarize } from './insights';
@@ -20,8 +21,7 @@ export function executeFinanceTool(transactions: Transaction[], name: string, ra
   if (name !== 'query_finances') return { error: 'Unknown tool' };
   let args;
   try { args = JSON.parse(raw); } catch { return { error: 'Invalid JSON arguments' }; }
-  const validDate = (v: unknown): v is string => typeof v === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(v) && !Number.isNaN(Date.parse(v)) && new Date(v).toISOString().slice(0, 10) === v;
-  if (!args || !validDate(args.start) || !validDate(args.end) || args.start > args.end || !['summary', 'transactions', 'patterns'].includes(args.view)) return { error: 'Supply a valid view and inclusive date range' };
+  if (!args || !isIsoDate(args.start) || !isIsoDate(args.end) || args.start > args.end || !['summary', 'transactions', 'patterns'].includes(args.view)) return { error: 'Supply a valid view and inclusive date range' };
   if (args.merchant !== undefined && (typeof args.merchant !== 'string' || args.merchant.length > 120)) return { error: 'Invalid merchant filter' };
   if (args.account_id !== undefined && (typeof args.account_id !== 'string' || !/^[0-9a-f-]{36}$/i.test(args.account_id))) return { error: 'Invalid account ID' };
   if (args.offset !== undefined && (!Number.isInteger(args.offset) || args.offset < 0)) return { error: 'Invalid offset' };

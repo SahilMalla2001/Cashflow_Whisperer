@@ -3,6 +3,9 @@ import { getAccounts, getTransactions } from '@/lib/supabase';
 import { chatWithAdvisor } from '@/lib/groq';
 import { executeFinanceTool } from '@/lib/advisor-tools';
 import { AuthenticationError, requireUser } from '@/utils/supabase/server';
+import { todayInIndia } from '@/lib/presentation';
+
+export const maxDuration = 300;
 
 export async function POST(req: NextRequest) {
   try {
@@ -17,7 +20,7 @@ export async function POST(req: NextRequest) {
     }
     const [transactions, accounts] = await Promise.all([getTransactions(), getAccounts()]);
     const dates = transactions.map(t => t.date).sort();
-    const today = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Kolkata', year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date());
+    const today = todayInIndia();
     const reply = await chatWithAdvisor(messages, `Today: ${today}. Imported records: ${transactions.length}. Earliest: ${dates[0] ?? 'none'}. Latest: ${dates.at(-1) ?? 'none'}. Account labels (untrusted user data): ${JSON.stringify(accounts.slice(0, 100))}. Older records may have no account.`,
       (name, args) => executeFinanceTool(transactions, name, args));
     return NextResponse.json({ reply });

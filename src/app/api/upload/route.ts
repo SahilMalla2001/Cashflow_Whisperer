@@ -15,6 +15,7 @@ import { validateTransactions } from "@/lib/transaction-validation";
 import { AuthenticationError, requireUser } from "@/utils/supabase/server";
 
 export const runtime = "nodejs";
+export const maxDuration = 300;
 
 type Source = Transaction["source"];
 const VALID_SOURCES: Source[] = ["savings", "credit"];

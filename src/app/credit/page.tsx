@@ -1,15 +1,15 @@
 export const dynamic = "force-dynamic";
 
-import { getDistinctCards, getTransactions } from "@/lib/supabase";
+import { getTransactions } from "@/lib/supabase";
+import { summarize } from "@/lib/insights";
 import { formatCurrency } from "@/lib/utils";
 import Link from "next/link";
 import { CreditCard, ArrowRight, Upload } from "lucide-react";
 
 export default async function CreditPage() {
-  const [cardNames, allCreditTxns] = await Promise.all([
-    getDistinctCards(),
-    getTransactions("credit"),
-  ]);
+  const allCreditTxns = await getTransactions("credit");
+  const cardNames = [...new Set(allCreditTxns.map(t => t.card_name))]
+    .filter((name): name is string => Boolean(name));
 
   const totalCreditSpend = allCreditTxns
     .filter((t) => t.type === "debit")
@@ -22,14 +22,14 @@ export default async function CreditPage() {
           <h1>Credit Cards</h1>
           <p>
             {cardNames.length > 0
-              ? `${cardNames.length} card${cardNames.length > 1 ? "s" : ""} · Total spend across all cards`
+              ? `${cardNames.length} card${cardNames.length > 1 ? "s" : ""} | All imported history | gross debits across cards`
               : "No credit card statements uploaded yet"}
           </p>
         </div>
         {cardNames.length > 0 && (
           <div className="stat-card" style={{ minWidth: "160px" }}>
-            <div className="stat-label">Total CC Spend</div>
-            <div className="stat-value negative">{formatCurrency(totalCreditSpend)}</div>
+            <div className="stat-label">Gross card debits</div>
+            <div className="stat-value">{formatCurrency(totalCreditSpend)}</div>
           </div>
         )}
       </div>
@@ -49,6 +49,11 @@ export default async function CreditPage() {
             const txns = allCreditTxns.filter((t) => t.card_name === cardName);
             const spend = txns.filter((t) => t.type === "debit").reduce((s, t) => s + t.amount, 0);
             const slug = encodeURIComponent(cardName);
+            const totals = summarize(txns);
+            const purchases = txns.filter(t=>t.type==='debit' && ['Needs','Wants'].includes(t.category));
+            const byCategory = new Map<string,number>();
+            for(const t of purchases) byCategory.set(t.subcategory||t.category,(byCategory.get(t.subcategory||t.category)??0)+t.amount);
+            const top = [...byCategory].sort((a,b)=>b[1]-a[1]).slice(0,2);
 
             return (
               <Link key={cardName} href={`/credit/${slug}`} style={{ textDecoration: "none" }}>
@@ -61,9 +66,11 @@ export default async function CreditPage() {
                     <ArrowRight size={14} style={{ color: "var(--text-muted)" }} />
                   </div>
 
+                  <p>Spending &amp; loans, net of refunds: {formatCurrency(totals.totalOutflow)} · Refund credits: {formatCurrency(totals.refunds)}</p>
+                  <p>{top.length ? top.map(([name,value])=>`${name}: ${formatCurrency(value)}`).join(' | ') : 'No categorized purchases'} (gross purchases)</p>
                   <div style={{ display: "flex", gap: "24px" }}>
                     <div>
-                      <div className="stat-label">Total Spend</div>
+                      <div className="stat-label">Gross debits</div>
                       <div style={{ fontSize: "1.25rem", fontWeight: 700 }}>{formatCurrency(spend)}</div>
                     </div>
                     <div>

@@ -1,44 +1,33 @@
 import Link from 'next/link';
-import { getAccounts, getTransactions, createClient } from '@/lib/supabase';
+import { getAccounts, getTransactions, getStatements } from '@/lib/supabase';
 import { formatCurrency as money } from '@/lib/utils';
 import { summarize } from '@/lib/insights';
+import { BalanceReview } from '@/components/ReviewForms';
+import { StatementBalances } from '@/components/StatementBalances';
+import { todayInIndia } from '@/lib/presentation';
 import { notFound } from 'next/navigation';
-
 export const dynamic = 'force-dynamic';
-
 export default async function AccountsPage({ searchParams }: { searchParams: Promise<{ account?: string }> }) {
   const { account } = await searchParams;
-  const [accounts, transactions] = await Promise.all([getAccounts(), getTransactions()]);
-  if (account && account !== 'unassigned' && !accounts.some(a => a.id === account)) notFound();
-  const rows = account ? transactions.filter(t => account === 'unassigned' ? !t.account_id : t.account_id === account) : transactions;
+  const [accounts, transactions, allStatements] = await Promise.all([getAccounts(),getTransactions(),getStatements()]);
+  if (account && account !== 'unassigned' && !accounts.some(a=>a.id===account)) notFound();
+  const include = (id: string | null | undefined) => !account || (account==='unassigned' ? !id : id===account);
+  const rows = transactions.filter(t=>include(t.account_id));
+  const statements = allStatements.filter(s=>include(s.account_id));
   const totals = summarize(rows);
-  const client = await createClient();
-  let query = client.from('statements').select('id,filename,status,transaction_count,reconciliation,account_id').order('created_at', { ascending: false }).limit(100);
-  if (account === 'unassigned') query = query.is('account_id', null);
-  else if (account && accounts.some(a => a.id === account)) query = query.eq('account_id', account);
-  const { data: statements, error } = await query;
-  if (error) throw new Error('Unable to load statement history. Apply migrate_v5_reliability.sql if upgrading.');
-  return <div>
-    <div className="page-header"><div><h1>Accounts and statement quality</h1><p>Separate account histories and review extracted balance checks.</p></div></div>
-    <nav className="card section" style={{ display: 'flex', flexWrap: 'wrap', gap: 16 }}>
-      <Link href="/accounts">All accounts</Link>
-      {accounts.map(a => <Link key={a.id} href={`/accounts?account=${a.id}`}>{a.name} ({a.type})</Link>)}
-      <Link href="/accounts?account=unassigned">Older / unassigned imports</Link>
-    </nav>
-    <p>{rows.length} transactions · income {money(totals.totalInflow)} · spending and loans net of refunds {money(totals.totalOutflow)}. These totals are not account balances.</p>
-    <div className="card section" style={{ overflowX: 'auto' }}><h2>Latest 100 statements</h2>
-      <p>A match checks extracted balances only. Missing balances remain unverified; mismatches need review against the PDF.</p>
-      <table className="data-table"><thead><tr><th>Statement</th><th>Import status</th><th>Stored / reported rows</th><th>Balance check</th></tr></thead><tbody>
-        {(statements ?? []).map(s => {
-          const actual = transactions.filter(t => t.statement_id === s.id).length;
-          return <tr key={s.id}><td>{s.filename}</td><td>{s.status}</td><td>{actual} / {s.transaction_count}{actual !== s.transaction_count ? ' · review needed' : ''}</td><td>{s.reconciliation?.status ?? 'unverified'}{s.reconciliation?.status === 'mismatch' ? ` · difference ${money(Number(s.reconciliation.difference))}` : ''}{s.reconciliation?.possible_overlap_count > 0 ? ` · ${s.reconciliation.possible_overlap_count} possible overlapping rows` : ''}</td></tr>;
-        })}
-      </tbody></table>
-    </div>
-    <div className="card" style={{ overflowX: 'auto' }}><h2>Latest 100 transactions</h2>
-      <table className="data-table"><thead><tr><th>Date</th><th>Description</th><th>Category</th><th>Amount</th></tr></thead><tbody>
-        {rows.slice(0, 100).map(t => <tr key={t.id}><td>{t.date}</td><td>{t.description}</td><td>{t.category}</td><td>{t.type === 'credit' ? '+' : '-'}{money(Number(t.amount))}</td></tr>)}
-      </tbody></table>
-    </div>
+  const statementCounts = new Map<string, number>();
+  for (const transaction of transactions) {
+    if (transaction.statement_id) statementCounts.set(transaction.statement_id, (statementCounts.get(transaction.statement_id) ?? 0) + 1);
+  }
+  return <div><div className="page-header"><div><h1>Accounts and statements</h1><p>Review statement balances, import quality and transaction categories.</p></div><Link className="btn" href="/review">Review categories</Link></div>
+    <nav className="account-filters section" aria-label="Filter accounts">{[{id:'',name:'All accounts'},...accounts,{id:'unassigned',name:'Unassigned imports'}].map(a=><Link className={`filter-pill ${(account??'')===a.id?'selected':''}`} aria-current={(account??'')===a.id?'page':undefined} key={a.id} href={a.id?`/accounts?account=${a.id}`:'/accounts'}>{a.name}</Link>)}</nav>
+    <p className="section">All imported history ? {rows.length} transactions ? recorded income {money(totals.totalInflow)} ? spending and loans net of refunds {money(totals.totalOutflow)}. These are not bank balances.</p>
+    <StatementBalances accounts={accounts.filter(a=>include(a.id))} statements={statements} asOf={todayInIndia()} />
+    <div className="card section table-scroll"><h2>Statement history</h2><p>Showing the latest 100 of {statements.length} statements. A balance match checks arithmetic, not categories or completeness.</p><table className="data-table"><thead><tr><th>Statement</th><th>Import</th><th>Stored transactions</th><th>Balance review</th></tr></thead><tbody>{statements.slice(0,100).map(s=>{
+      const actual=statementCounts.get(s.id) ?? 0;
+      const r=s.reconciliation;
+      return <tr key={s.id}><td><Link className="text-link" href={`/review?statement=${s.id}`}>{s.filename}</Link></td><td><span className={`badge ${s.status==='complete'?'badge-green':'badge-yellow'}`}>{s.status==='complete'?'Imported':s.status==='processing'?'Processing':'Needs review'}</span></td><td>{actual} transactions<span className={`badge ${actual===s.transaction_count?'':'badge-yellow'}`}>{actual===s.transaction_count?'Count matches':`Expected ${s.transaction_count}`}</span></td><td><span className={`badge ${r?.status==='matched'?'badge-green':r?.status==='mismatch'?'badge-red':'badge-yellow'}`}>{r?.status==='matched'?'Balances reconcile':r?.status==='mismatch'?`Needs review ? ${money(Math.abs(r.difference??0))} difference`:'Balance check unavailable'}</span>{!!r?.possible_overlap_count&&<p>{r.possible_overlap_count} possible overlapping rows; review before relying on totals.</p>}{s.status==='complete'&&<BalanceReview statement={s}/>}</td></tr>;
+    })}</tbody></table></div>
+    <p className="insight-box">Unassigned here means your owned transactions without an account. Legacy rows without a user owner are intentionally inaccessible in the app and need a separate database review before any reassignment.</p>
   </div>;
 }

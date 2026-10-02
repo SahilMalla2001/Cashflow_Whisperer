@@ -1,3 +1,4 @@
+import { isIsoDate } from './transaction-domain';
 export interface StatementMetadata {
   opening_balance: number | null;
   closing_balance: number | null;
@@ -15,7 +16,7 @@ export function mergeMetadata(parts: StatementMetadata[]): StatementMetadata {
     return values.length === 1 ? values[0] : null;
   };
   const date = (key: 'statement_start' | 'statement_end') => {
-    const values = [...new Set(parts.map(p => p?.[key]).filter((v): v is string => typeof v === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(v) && !Number.isNaN(Date.parse(v)) && new Date(v).toISOString().slice(0, 10) === v))];
+    const values = [...new Set(parts.map(p => p?.[key]).filter(isIsoDate))];
     return values.length === 1 ? values[0] : null;
   };
   result.opening_balance = amount('opening_balance');
